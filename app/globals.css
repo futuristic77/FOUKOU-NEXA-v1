@@ -467,10 +467,21 @@ textarea:focus-visible {
   gap: 12px;
 }
 
+.topbar-left {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.topbar-actions {
+  flex: 0 0 auto;
+}
+
 .topbar-section-label {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 3px;
+  overflow: hidden;
 }
 
 .topbar-section-label span {
@@ -865,6 +876,7 @@ textarea:focus-visible {
 }
 
 .metric-card {
+  min-width: 0;
   min-height: 150px;
   border: 1px solid var(--border-soft);
   border-radius: 15px;
@@ -3583,6 +3595,12 @@ textarea:focus-visible {
     display: inline-flex;
   }
 
+  .mobile-menu-button,
+  .topbar-icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
   .topbar {
     min-height: 66px;
     padding: 0 20px;
@@ -3674,7 +3692,7 @@ textarea:focus-visible {
   }
 
   .topbar-section-label strong {
-    max-width: 190px;
+    max-width: 100%;
     font-size: 12px;
   }
 
@@ -3686,11 +3704,22 @@ textarea:focus-visible {
     display: none;
   }
 
+  .topbar-popover {
+    position: fixed;
+    top: 74px;
+    right: 14px;
+    left: 14px;
+    width: auto;
+    max-height: calc(100dvh - 88px);
+    overflow-y: auto;
+  }
+
   .profile-copy {
     display: none;
   }
 
   .profile-button {
+    min-width: 44px;
     gap: 4px;
     padding-right: 2px;
   }
@@ -3701,7 +3730,7 @@ textarea:focus-visible {
   }
 
   .app-content-area {
-    padding: 18px 14px 23px;
+    padding: 16px 14px 21px;
   }
 
   .dashboard-view,
@@ -3709,30 +3738,41 @@ textarea:focus-visible {
     gap: 13px;
   }
 
+  .dashboard-view {
+    gap: 10px;
+  }
+
   .welcome-panel {
-    min-height: 212px;
+    min-height: 0;
     align-items: flex-start;
-    padding: 24px 20px;
+    padding: 16px 20px 15px;
   }
 
   .welcome-copy {
     max-width: 100%;
   }
 
+  .welcome-eyebrow {
+    margin-bottom: 5px;
+  }
+
   .welcome-copy h1 {
     max-width: 360px;
-    font-size: 27px;
+    font-size: 25px;
+    line-height: 1.12;
   }
 
   .welcome-description {
     max-width: 320px;
+    margin-top: 7px;
     font-size: 12px;
+    line-height: 1.5;
   }
 
   .welcome-date {
     flex-wrap: wrap;
     max-width: 330px;
-    margin-top: 16px;
+    margin-top: 10px;
     font-size: 10px;
   }
 
@@ -3741,7 +3781,8 @@ textarea:focus-visible {
   }
 
   .welcome-demo-label {
-    margin-top: 13px;
+    margin-top: 8px;
+    padding: 5px 8px;
     font-size: 7px;
   }
 
@@ -3752,11 +3793,11 @@ textarea:focus-visible {
 
   .dashboard-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px;
+    gap: 8px;
   }
 
   .metric-card {
-    min-height: 126px;
+    min-height: 122px;
   }
 
   .metric-card-header {
@@ -3764,8 +3805,8 @@ textarea:focus-visible {
   }
 
   .metric-icon {
-    width: 31px;
-    height: 31px;
+    width: 32px;
+    height: 32px;
   }
 
   .metric-label {
@@ -4302,13 +4343,17 @@ textarea:focus-visible {
 }
 
 @media (max-width: 420px) {
-  .topbar-section-label strong {
-    max-width: 145px;
+  .topbar {
+    padding: 0 12px;
   }
 
-  .topbar-icon-button {
-    width: 34px;
-    height: 34px;
+  .topbar-left,
+  .topbar-actions {
+    gap: 4px;
+  }
+
+  .topbar-section-label strong {
+    max-width: 100%;
   }
 
   .profile-button > svg {
@@ -4316,16 +4361,30 @@ textarea:focus-visible {
   }
 
   .welcome-panel {
-    min-height: 222px;
-    padding: 22px 17px;
+    min-height: 0;
+    padding: 14px 15px 13px;
   }
 
   .welcome-copy h1 {
-    font-size: 25px;
+    font-size: 24px;
+    line-height: 1.1;
+  }
+
+  .welcome-description {
+    margin-top: 7px;
+    line-height: 1.45;
+  }
+
+  .welcome-date {
+    margin-top: 9px;
+  }
+
+  .welcome-demo-label {
+    margin-top: 7px;
   }
 
   .metric-card {
-    min-height: 122px;
+    min-height: 118px;
   }
 
   .metric-card .metric-card-header,
