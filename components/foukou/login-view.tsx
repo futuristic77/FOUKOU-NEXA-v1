@@ -31,7 +31,7 @@ export function LoginView() {
       <section className="login-form-side">
         <div className="login-form-wrap">
           <p className="eyebrow">ACCÈS À L’ESPACE SCOLAIRE</p>
-          <h1>Content de vous revoir.</h1>
+          <h1>Bienvenue dans votre espace.</h1>
           <p className="login-intro">Connectez-vous avec les identifiants de votre établissement.</p>
           <div className="login-demo-note" role="note"><LockKeyhole aria-hidden="true" /><p>Authentification non configurée : cette maquette ne vérifie ni ne conserve aucun identifiant.</p></div>
 

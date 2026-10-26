@@ -215,9 +215,9 @@ export function DashboardView({
                   </defs>
                   <CartesianGrid vertical={false} strokeDasharray="3 5" />
                   <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={9} />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={6} width={46} domain={[800, 'dataMax + 80']} tickFormatter={(value) => `${(Number(value) / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}k`} />
+                  <YAxis tickLine={false} axisLine={false} tickMargin={6} width={56} domain={[800, 1400]} ticks={[800, 1000, 1200, 1400]} tickFormatter={(value) => Number(value).toLocaleString('fr-FR')} />
                   <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
-                  <Area dataKey="students" type="monotone" stroke="var(--color-students)" strokeWidth={2.5} fill="url(#enrollment-fill)" activeDot={{ r: 4, strokeWidth: 0 }} />
+                  <Area dataKey="students" type="monotone" stroke="var(--color-students)" strokeWidth={2.5} fill="url(#enrollment-fill)" activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
                 </AreaChart>
               </ChartContainer>
               <p className="chart-caption">Effectifs mensuels · valeurs fictives</p>
@@ -237,7 +237,7 @@ export function DashboardView({
                 <ChartContainer config={distributionConfig} className="donut-chart" role="img" aria-label="Répartition fictive des élèves par niveau scolaire">
                   <PieChart accessibilityLayer>
                     <ChartTooltip content={<ChartTooltipContent hideLabel />} />
-                    <Pie data={distribution} dataKey="students" nameKey="level" innerRadius={53} outerRadius={76} paddingAngle={2} stroke="none" />
+                    <Pie data={distribution} dataKey="students" nameKey="level" innerRadius={53} outerRadius={76} paddingAngle={2} stroke="none" isAnimationActive={false} />
                   </PieChart>
                 </ChartContainer>
                 <div className="donut-center" aria-hidden="true">
