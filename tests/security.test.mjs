@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hashPassword, verifyPassword, validatePassword } from '../lib/password.mjs'
 import { hasPermission } from '../lib/permissions.mjs'
+import { hasTeacherAssignment, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
 
 test('scrypt vérifie le bon mot de passe et refuse un autre', async () => {
   const encoded = await hashPassword('un-mot-de-passe-tres-long')
@@ -55,4 +56,107 @@ test('la lecture seule et les rôles inconnus ne peuvent rien modifier', () => {
     assert.equal(hasPermission(role, 'grades:write'), false)
     assert.equal(hasPermission(role, 'settings:write'), false)
   }
+})
+
+test('les enseignants ne peuvent écrire que dans leurs affectations exactes', () => {
+  const assignments = [
+    { classId: 'class-a', subjectId: 'math' },
+    { classId: 'class-b', subjectId: 'french' },
+  ]
+  assert.equal(hasTeacherAssignment(assignments, 'class-a', 'math'), true)
+  assert.equal(hasTeacherAssignment(assignments, 'class-a', 'french'), false)
+  assert.equal(hasTeacherAssignment(assignments, 'class-b', 'math'), false)
+  assert.equal(hasTeacherAssignment(assignments, 'class-a'), true)
+})
+
+test('les données envoyées à un enseignant sont limitées à ses classes et matières', () => {
+  const data = {
+    students: [
+      { id: 'student-a', classId: 'class-a', guardianPhone: 'scope-a' },
+      { id: 'student-b', classId: 'class-b', guardianPhone: 'scope-b' },
+    ],
+    classes: [{ id: 'class-a' }, { id: 'class-b' }],
+    teachers: [{ id: 'teacher-a' }, { id: 'teacher-b' }],
+    subjects: [{ id: 'math' }, { id: 'french' }],
+    assignments: [
+      { id: 'assignment-a', teacherId: 'teacher-a', classId: 'class-a', subjectId: 'math' },
+      { id: 'assignment-b', teacherId: 'teacher-b', classId: 'class-a', subjectId: 'french' },
+      { id: 'assignment-c', teacherId: 'teacher-b', classId: 'class-b', subjectId: 'math' },
+    ],
+    grades: [
+      { id: 'grade-a', studentId: 'student-a', subjectId: 'math' },
+      { id: 'grade-b', studentId: 'student-a', subjectId: 'french' },
+      { id: 'grade-c', studentId: 'student-b', subjectId: 'math' },
+    ],
+    attendance: [
+      { id: 'attendance-a', studentId: 'student-a', classId: 'class-a' },
+      { id: 'attendance-b', studentId: 'student-b', classId: 'class-b' },
+    ],
+    schedules: [
+      { id: 'schedule-a', teacherId: 'teacher-a', classId: 'class-a', subjectId: 'math' },
+      { id: 'schedule-b', teacherId: 'teacher-b', classId: 'class-a', subjectId: 'french' },
+    ],
+    communications: [{ id: 'published', status: 'published' }, { id: 'draft', status: 'draft' }],
+    activities: [{ id: 'activity-outside-scope' }],
+    reports: [{
+      studentId: 'student-a',
+      rows: [
+        { subjectId: 'math', average: 14, coefficient: 2 },
+        { subjectId: 'french', average: 18, coefficient: 1 },
+      ],
+      average: 15.33,
+    }, {
+      studentId: 'student-b',
+      rows: [{ subjectId: 'math', average: 12, coefficient: 2 }],
+      average: 12,
+    }],
+    users: [{ id: 'other-user' }],
+  }
+
+  const scoped = scopeSchoolDataForUser(data, { role: 'teacher' }, ['teacher-a'])
+  assert.deepEqual(scoped.students.map((item) => item.id), ['student-a'])
+  assert.deepEqual(scoped.students.map((item) => item.guardianPhone), ['scope-a'])
+  assert.deepEqual(scoped.classes.map((item) => item.id), ['class-a'])
+  assert.deepEqual(scoped.teachers.map((item) => item.id), ['teacher-a'])
+  assert.deepEqual(scoped.subjects.map((item) => item.id), ['math'])
+  assert.deepEqual(scoped.assignments.map((item) => item.id), ['assignment-a'])
+  assert.deepEqual(scoped.grades.map((item) => item.id), ['grade-a'])
+  assert.deepEqual(scoped.attendance.map((item) => item.id), ['attendance-a'])
+  assert.deepEqual(scoped.schedules.map((item) => item.id), ['schedule-a'])
+  assert.deepEqual(scoped.communications.map((item) => item.id), ['published'])
+  assert.deepEqual(scoped.activities, [])
+  assert.deepEqual(scoped.users, [])
+  assert.deepEqual(scoped.reports[0].rows.map((item) => item.subjectId), ['math'])
+  assert.equal(scoped.reports[0].average, 14)
+})
+
+test('les autres rôles conservent les données non filtrées', () => {
+  const data = { students: [{ id: 'student-a' }] }
+  assert.equal(scopeSchoolDataForUser(data, { role: 'director' }, []), data)
+  assert.equal(scopeSchoolDataForUser(data, { role: 'administration' }, []), data)
+  assert.equal(scopeSchoolDataForUser(data, { role: 'secretary' }, []), data)
+  assert.equal(scopeSchoolDataForUser(data, { role: 'viewer' }, []), data)
+})
+
+test('un compte enseignant sans fiche liée ne reçoit aucune donnée élève', () => {
+  const data = {
+    students: [{ id: 'student-a', classId: 'class-a' }],
+    classes: [{ id: 'class-a' }],
+    teachers: [{ id: 'teacher-a' }],
+    subjects: [{ id: 'math' }],
+    assignments: [{ teacherId: 'teacher-a', classId: 'class-a', subjectId: 'math' }],
+    grades: [{ id: 'grade-a', studentId: 'student-a', subjectId: 'math' }],
+    attendance: [{ id: 'attendance-a', studentId: 'student-a', classId: 'class-a' }],
+    schedules: [{ id: 'schedule-a', teacherId: 'teacher-a', classId: 'class-a', subjectId: 'math' }],
+    communications: [],
+    activities: [],
+    reports: [{ studentId: 'student-a', rows: [], average: null }],
+    users: [],
+  }
+  const scoped = scopeSchoolDataForUser(data, { role: 'teacher' }, [])
+  assert.deepEqual(scoped.students, [])
+  assert.deepEqual(scoped.grades, [])
+  assert.deepEqual(scoped.attendance, [])
+  assert.deepEqual(scoped.schedules, [])
+  assert.deepEqual(scoped.reports, [])
 })
