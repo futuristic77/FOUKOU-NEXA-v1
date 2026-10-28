@@ -1,178 +1,44 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, FileCheck2, Printer, ShieldCheck } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { FileCheck2, Plus, Printer, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { demoStudents } from './data'
+import { Card, CardHeader } from '@/components/ui/card'
+import { deleteGrade, deleteSubject, saveGrade, saveSubject } from '@/app/actions'
+import { hasPermission } from '@/lib/permissions.mjs'
+import type { Grade, ReportCard, SchoolData, Subject } from './types'
+import { ActionForm, HiddenId } from './action-form'
 import { BrandLockup } from './brand-mark'
-import type { Student } from './types'
-import { DemoNotice, PageHeading } from './shared'
+import { EmptyState, PageHeading } from './shared'
 
-const subjects = ['Mathématiques', 'Français', 'Sciences physiques']
-const periods = ['Trimestre 1', 'Trimestre 2', 'Trimestre 3']
-const coefficients = [1, 1, 2] as const
-
-type GradeRow = {
-  student: Student
-  scores: [number, number, number]
-  appreciation: string
-}
-
-function makeDemoRows(className: string, subject: string, period: string): GradeRow[] {
-  const roster = demoStudents.filter((student) => student.className === className)
-  const subjectOffset = Math.max(0, subjects.indexOf(subject))
-  const periodOffset = Math.max(0, periods.indexOf(period))
-  return roster.map((student, index) => {
-    const base = 11 + ((index * 3 + subjectOffset * 2 + periodOffset) % 8)
-    return {
-      student,
-      scores: [base, Math.min(20, base + ((index + 1) % 4) - 1), Math.min(20, base + ((index + subjectOffset) % 3))],
-      appreciation: base >= 15 ? 'Un travail sérieux et régulier.' : 'Des efforts réguliers sont attendus.',
-    }
-  })
-}
-
-function average(scores: [number, number, number]) {
-  const weightedTotal = scores.reduce((total, score, index) => total + score * coefficients[index], 0)
-  return weightedTotal / coefficients.reduce((total, coefficient) => total + coefficient, 0)
-}
-
-export function GradesView() {
-  const classOptions = Array.from(new Set(demoStudents.map((student) => student.className)))
-  const [className, setClassName] = useState('5e B')
-  const [subject, setSubject] = useState(subjects[0])
-  const [period, setPeriod] = useState(periods[0])
-  const [gradeBook, setGradeBook] = useState<Record<string, GradeRow[]>>({})
-  const [actionMessage, setActionMessage] = useState('')
-  const [previewRow, setPreviewRow] = useState<GradeRow | null>(null)
+export function GradesView({ data }: { data: SchoolData }) {
+  const [tab, setTab] = useState<'grades' | 'subjects' | 'reports'>('grades')
+  const [classFilter, setClassFilter] = useState('')
+  const [term, setTerm] = useState(data.settings.currentTerm)
+  const [formOpen, setFormOpen] = useState(false)
+  const [preview, setPreview] = useState<ReportCard | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
-  const bookKey = `${className}|${subject}|${period}`
-  const rows = gradeBook[bookKey] ?? makeDemoRows(className, subject, period)
-  const classAverage = useMemo(() => rows.length ? rows.reduce((sum, row) => sum + average(row.scores), 0) / rows.length : 0, [rows])
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (previewRow && dialog && !dialog.open) dialog.showModal()
-    if (!previewRow && dialog?.open) dialog.close()
-  }, [previewRow])
-
-  function updateRow(studentId: string, update: Partial<Pick<GradeRow, 'scores' | 'appreciation'>>) {
-    setGradeBook((current) => {
-      const currentRows = current[bookKey] ?? rows
-      return {
-        ...current,
-        [bookKey]: currentRows.map((row) => row.student.id === studentId ? { ...row, ...update } : row),
-      }
-    })
-  }
-
-  function updateScore(row: GradeRow, index: number, rawValue: string) {
-    const nextScores: [number, number, number] = [...row.scores]
-    const numericValue = rawValue === '' ? 0 : Number(rawValue)
-    nextScores[index] = Number.isFinite(numericValue) ? Math.min(20, Math.max(0, numericValue)) : 0
-    updateRow(row.student.id, { scores: nextScores })
-  }
-
-  const reportAverage = previewRow ? average(previewRow.scores) : 0
-
-  return (
-    <div className="section-view">
-      <PageHeading
-        eyebrow="ÉVALUATIONS · TRIMESTRE 1"
-        title="Notes et bulletins"
-        description="Saisissez les évaluations, vérifiez les moyennes pondérées et prévisualisez un bulletin A4."
-        actions={<Button variant="outline" onClick={() => setActionMessage('La validation officielle est indisponible : aucun serveur d’établissement ni rôle de validation n’est connecté.')}><ShieldCheck data-icon="inline-start" aria-hidden="true" />État de validation</Button>}
-      />
-      <DemoNotice>Les notes et moyennes sont des exemples modifiables en session. La validation officielle n’est pas active sans connexion à l’établissement.</DemoNotice>
-
-      <Card className="grades-card">
-        <CardHeader className="grades-toolbar">
-          <div className="grades-filters">
-            <label className="form-field compact-form-field"><span>Classe</span><select value={className} onChange={(event) => { setClassName(event.target.value); setActionMessage('') }}>{classOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
-            <label className="form-field compact-form-field"><span>Matière</span><select value={subject} onChange={(event) => { setSubject(event.target.value); setActionMessage('') }}>{subjects.map((option) => <option key={option}>{option}</option>)}</select></label>
-            <label className="form-field compact-form-field"><span>Période</span><select value={period} onChange={(event) => { setPeriod(event.target.value); setActionMessage('') }}>{periods.map((option) => <option key={option}>{option}</option>)}</select></label>
-          </div>
-          <div className="grades-average-summary"><span>Moyenne de la classe · démo</span><strong>{classAverage.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}<small>/20</small></strong></div>
-        </CardHeader>
-
-        {actionMessage ? <p className="session-message" role="status">{actionMessage}</p> : null}
-
-        <div className="table-scroll desktop-record-table">
-          <table className="data-table grades-table">
-            <thead><tr><th scope="col">Élève</th><th scope="col">Évaluation 1 <span className="coefficient">Coeff. 1</span></th><th scope="col">Évaluation 2 <span className="coefficient">Coeff. 1</span></th><th scope="col">Évaluation 3 <span className="coefficient">Coeff. 2</span></th><th scope="col">Moyenne</th><th scope="col">Appréciation</th><th scope="col">Bulletin</th></tr></thead>
-            <tbody>{rows.map((row) => (
-              <tr key={row.student.id}>
-                <td><strong>{row.student.name}</strong><span className="table-subline">{row.student.id}</span></td>
-                {row.scores.map((score, index) => <td key={index}><label className="visually-hidden" htmlFor={`${row.student.id}-score-${index}`}>{`Note ${index + 1} de ${row.student.name}, sur 20`}</label><input id={`${row.student.id}-score-${index}`} className="grade-input" type="number" min="0" max="20" step="0.25" value={score} onChange={(event) => updateScore(row, index, event.target.value)} /></td>)}
-                <td><strong className="grade-average">{average(row.scores).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}<small>/20</small></strong></td>
-                <td><label className="visually-hidden" htmlFor={`${row.student.id}-appreciation`}>Appréciation de {row.student.name}</label><input id={`${row.student.id}-appreciation`} className="appreciation-input" value={row.appreciation} onChange={(event) => updateRow(row.student.id, { appreciation: event.target.value })} /></td>
-                <td><Button variant="ghost" size="sm" onClick={() => setPreviewRow(row)}>A4 <ArrowRight data-icon="inline-end" aria-hidden="true" /></Button></td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-
-        <div className="mobile-grade-list">
-          {rows.map((row) => (
-            <article className="grade-mobile-card" key={row.student.id}>
-              <div className="mobile-record-heading"><div><strong>{row.student.name}</strong><span>{row.student.className} · dossier exemple</span></div><strong className="grade-average">{average(row.scores).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}<small>/20</small></strong></div>
-              <div className="mobile-score-grid">{row.scores.map((score, index) => <label className="form-field" key={index}><span>Éval. {index + 1} · coeff. {coefficients[index]}</span><input className="grade-input" type="number" min="0" max="20" step="0.25" value={score} aria-label={`Note ${index + 1} de ${row.student.name}, sur 20`} onChange={(event) => updateScore(row, index, event.target.value)} /></label>)}</div>
-              <label className="form-field"><span>Appréciation</span><textarea className="appreciation-textarea" value={row.appreciation} onChange={(event) => updateRow(row.student.id, { appreciation: event.target.value })} /></label>
-              <Button variant="outline" size="sm" onClick={() => setPreviewRow(row)}><FileCheck2 data-icon="inline-start" aria-hidden="true" />Prévisualiser le bulletin A4</Button>
-            </article>
-          ))}
-        </div>
-
-        <div className="grades-card-footer">
-          <p><strong>Calcul appliqué :</strong> moyenne pondérée selon les coefficients affichés, arrondie au dixième.</p>
-          <span>Les modifications restent dans la session de démonstration.</span>
-        </div>
-      </Card>
-
-      <dialog ref={dialogRef} className="record-dialog bulletin-dialog" onClose={() => setPreviewRow(null)} aria-labelledby="bulletin-preview-title">
-        {previewRow ? (
-          <div className="bulletin-dialog-content">
-            <div className="dialog-heading no-print"><div><p className="eyebrow">DOCUMENT · FORMAT A4</p><h2 id="bulletin-preview-title">Prévisualisation du bulletin</h2></div><button type="button" className="icon-quiet-button" aria-label="Fermer la prévisualisation" onClick={() => setPreviewRow(null)}><span aria-hidden="true">×</span></button></div>
-            <BulletinDocument row={previewRow} className={className} subject={subject} period={period} mean={reportAverage} />
-            <div className="bulletin-actions no-print"><p>Pour créer un PDF, choisissez « Enregistrer au format PDF » dans la boîte d’impression.</p><Button onClick={() => window.print()}><Printer data-icon="inline-start" aria-hidden="true" />Imprimer / exporter en PDF</Button></div>
-          </div>
-        ) : null}
-      </dialog>
-      <div className="print-page" aria-hidden="true">
-        {previewRow ? <BulletinDocument row={previewRow} className={className} subject={subject} period={period} mean={reportAverage} /> : null}
-      </div>
-    </div>
-  )
+  const canGrades = hasPermission(data.user.role, 'grades:write')
+  const canSubjects = hasPermission(data.user.role, 'subjects:write')
+  const canWrite = tab === 'subjects' ? canSubjects : canGrades
+  const grades = data.grades.filter((grade) => (!classFilter || grade.className === classFilter) && grade.term === term)
+  const reports = data.reports.filter((report) => (!classFilter || report.className === classFilter) && report.term === term)
+  const averages = reports.map((report) => report.average).filter((value): value is number => value !== null)
+  const classAverage = averages.length ? averages.reduce((a, b) => a + b, 0) / averages.length : null
+  useEffect(() => { const dialog = dialogRef.current; if (preview && dialog && !dialog.open) dialog.showModal(); if (!preview && dialog?.open) dialog.close() }, [preview])
+  const terms = Array.from(new Set([data.settings.currentTerm, ...data.grades.map((grade) => grade.term)]))
+  return <div className="section-view"><PageHeading eyebrow={`ÉVALUATIONS · ${data.settings.academicYear}`} title="Notes et bulletins" description="Enregistrez les évaluations et générez des moyennes pondérées à partir des notes réellement saisies." actions={canWrite && tab !== 'reports' ? <Button onClick={() => setFormOpen((value) => !value)}><Plus data-icon="inline-start" aria-hidden="true" />{tab === 'subjects' ? 'Nouvelle matière' : 'Saisir une note'}</Button> : undefined} />
+    <Card className="grades-card"><CardHeader className="grades-toolbar"><div className="management-tabs" role="tablist"><button type="button" role="tab" aria-selected={tab === 'grades'} className={tab === 'grades' ? 'is-selected' : ''} onClick={() => { setTab('grades'); setFormOpen(false) }}>Notes <span>{data.grades.length}</span></button><button type="button" role="tab" aria-selected={tab === 'subjects'} className={tab === 'subjects' ? 'is-selected' : ''} onClick={() => { setTab('subjects'); setFormOpen(false) }}>Matières et coefficients <span>{data.subjects.length}</span></button><button type="button" role="tab" aria-selected={tab === 'reports'} className={tab === 'reports' ? 'is-selected' : ''} onClick={() => { setTab('reports'); setFormOpen(false) }}>Bulletins <span>{data.reports.length}</span></button></div><div className="grades-filters"><label className="form-field compact-form-field"><span>Classe</span><select value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option value="">Toutes</option>{data.classes.map((item) => <option value={item.name} key={item.id}>{item.name}</option>)}</select></label><label className="form-field compact-form-field"><span>Période</span><select value={term} onChange={(event) => setTerm(event.target.value)}>{terms.map((item) => <option key={item}>{item}</option>)}</select></label></div><div className="grades-average-summary"><span>Moyenne des bulletins</span><strong>{classAverage === null ? '—' : classAverage.toLocaleString('fr-FR', { maximumFractionDigits: 2 })}<small>{classAverage === null ? '' : '/20'}</small></strong></div></CardHeader>
+      {formOpen && tab === 'grades' && canGrades ? <GradeForm data={data} term={term} onDone={() => setFormOpen(false)} /> : null}{formOpen && tab === 'subjects' && canSubjects ? <SubjectForm onDone={() => setFormOpen(false)} /> : null}
+      {tab === 'grades' ? <div className="table-scroll"><table className="data-table grades-table"><thead><tr><th>Élève</th><th>Classe</th><th>Matière</th><th>Évaluation</th><th>Note</th><th>Date</th>{canGrades ? <th>Actions</th> : null}</tr></thead><tbody>{grades.map((grade) => <tr key={grade.id}><td><strong>{grade.studentName}</strong></td><td>{grade.className}</td><td>{grade.subjectName}</td><td>{grade.assessment}<span className="table-subline">{grade.appreciation || 'Sans appréciation'}</span></td><td><strong className="grade-average">{grade.score.toLocaleString('fr-FR')}<small>/{grade.maxScore}</small></strong></td><td>{grade.gradedAt}</td>{canGrades ? <td><div className="record-actions"><details className="record-editor"><summary>Modifier</summary><GradeForm data={data} grade={grade} term={term} /></details><ActionForm action={deleteGrade} confirm={`Supprimer la note de ${grade.studentName} ?`}><HiddenId id={grade.id} /><Button type="submit" variant="ghost" size="sm" aria-label="Supprimer"><Trash2 aria-hidden="true" /></Button></ActionForm></div></td> : null}</tr>)}</tbody></table>{!grades.length ? <EmptyState title="Aucune note pour cette période" description="Saisissez une évaluation pour alimenter les moyennes et bulletins." /> : null}</div> : null}
+      {tab === 'subjects' ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Matière</th><th>Coefficient du bulletin</th>{canSubjects ? <th>Actions</th> : null}</tr></thead><tbody>{data.subjects.map((subject) => <tr key={subject.id}><td><strong>{subject.name}</strong></td><td>{subject.coefficient}</td>{canSubjects ? <td><div className="record-actions"><details className="record-editor"><summary>Modifier</summary><SubjectForm subject={subject} /></details><ActionForm action={deleteSubject} confirm={`Supprimer ${subject.name} ? Les notes associées doivent d’abord être supprimées.`}><HiddenId id={subject.id} /><Button type="submit" variant="ghost" size="sm" aria-label="Supprimer"><Trash2 aria-hidden="true" /></Button></ActionForm></div></td> : null}</tr>)}</tbody></table>{!data.subjects.length ? <EmptyState title="Aucune matière" description="Créez les matières et leurs coefficients avant la saisie des notes." /> : null}</div> : null}
+      {tab === 'reports' ? <div className="report-grid">{reports.map((report) => <article className="report-card" key={report.studentId}><div><p className="eyebrow">{report.className} · {report.term}</p><h2>{report.studentName}</h2></div><strong className="grade-average">{report.average === null ? '—' : report.average.toLocaleString('fr-FR')}<small>{report.average === null ? '' : '/20'}</small></strong><p>{report.rows.length ? `${report.rows.length} matière(s) évaluée(s)` : 'Aucune note sur cette période'}</p><Button variant="outline" size="sm" onClick={() => setPreview(report)}><FileCheck2 data-icon="inline-start" aria-hidden="true" />Voir le bulletin</Button></article>)}{!reports.length ? <EmptyState title="Aucun bulletin" description="Les élèves inscrits apparaissent ici, même avant la première note." /> : null}</div> : null}
+      <div className="grades-card-footer"><p><strong>Calcul :</strong> moyenne de chaque matière normalisée sur 20, puis moyenne générale pondérée par les coefficients. Les matières sans note ne sont pas comptées.</p><span>Période affichée : {term}</span></div>
+    </Card>
+    <dialog ref={dialogRef} className="record-dialog bulletin-dialog" onClose={() => setPreview(null)} aria-labelledby="bulletin-preview-title">{preview ? <div className="bulletin-dialog-content"><div className="dialog-heading no-print"><div><p className="eyebrow">DOCUMENT · FORMAT A4</p><h2 id="bulletin-preview-title">Bulletin de {preview.studentName}</h2></div><button type="button" className="icon-quiet-button" aria-label="Fermer" onClick={() => setPreview(null)}>×</button></div><Bulletin data={data} report={preview} /><div className="bulletin-actions no-print"><p>Pour créer un PDF, choisissez « Enregistrer au format PDF » dans la boîte d’impression.</p><Button onClick={() => window.print()}><Printer data-icon="inline-start" aria-hidden="true" />Imprimer / exporter en PDF</Button></div></div> : null}</dialog><div className="print-page" aria-hidden="true">{preview ? <Bulletin data={data} report={preview} /> : null}</div>
+  </div>
 }
 
-function BulletinDocument({
-  row,
-  className,
-  subject,
-  period,
-  mean,
-}: {
-  row: GradeRow
-  className: string
-  subject: string
-  period: string
-  mean: number
-}) {
-  return (
-    <article className="bulletin-document">
-      <div className="bulletin-document-header">
-        <div className="bulletin-brand-block"><BrandLockup className="bulletin-brand-art" /><p className="bulletin-school-line">Établissement scolaire · document de démonstration</p></div>
-        <div className="bulletin-period"><span>ANNÉE SCOLAIRE</span><strong>2026–2027</strong><span>{period}</span></div>
-      </div>
-      <div className="bulletin-rule" />
-      <p className="eyebrow">BULLETIN DE NOTES · APERÇU FICTIF</p>
-      <h2>Relevé de {subject}</h2>
-      <dl className="bulletin-student-details"><div><dt>Élève</dt><dd>{row.student.name}</dd></div><div><dt>Classe</dt><dd>{className}</dd></div><div><dt>Identifiant</dt><dd>{row.student.id}</dd></div></dl>
-      <table className="bulletin-table"><thead><tr><th>Matière</th><th>Évaluation 1</th><th>Évaluation 2</th><th>Évaluation 3</th><th>Moyenne</th></tr></thead><tbody><tr><td>{subject}</td>{row.scores.map((score, index) => <td key={index}>{score.toLocaleString('fr-FR')}/20 <small>· coeff. {coefficients[index]}</small></td>)}<td><strong>{mean.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/20</strong></td></tr></tbody></table>
-      <section className="bulletin-appreciation"><h3>Appréciation</h3><p>{row.appreciation || 'Aucune appréciation saisie.'}</p></section>
-      <p className="bulletin-demo-note">Document fictif généré dans une interface de démonstration. Il n’a aucune valeur administrative.</p>
-      <div className="bulletin-signatures"><span>Le professeur</span><span>La direction</span></div>
-    </article>
-  )
-}
+function GradeForm({ data, grade, term, onDone }: { data: SchoolData; grade?: Grade; term: string; onDone?: () => void }) { return <ActionForm action={saveGrade} className="inline-form" onSuccess={onDone} resetOnSuccess={!grade}><HiddenId id={grade?.id} /><div className="inline-form-heading"><div><p className="eyebrow">ÉVALUATION</p><h2>{grade ? 'Modifier la note' : 'Saisir une note'}</h2></div></div><div className="form-grid form-grid-3"><label className="form-field"><span>Élève</span><select name="studentId" required defaultValue={grade?.studentId ?? ''}><option value="" disabled>Choisir</option>{data.students.filter((item) => item.status === 'active').map((item) => <option value={item.id} key={item.id}>{item.fullName} · {item.className}</option>)}</select></label><label className="form-field"><span>Matière</span><select name="subjectId" required defaultValue={grade?.subjectId ?? ''}><option value="" disabled>Choisir</option>{data.subjects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label className="form-field"><span>Période</span><input name="term" required maxLength={50} defaultValue={grade?.term ?? term} /></label><label className="form-field"><span>Évaluation</span><input name="assessment" required maxLength={120} defaultValue={grade?.assessment} placeholder="Ex. Devoir 1" /></label><label className="form-field"><span>Note</span><input name="score" type="number" min="0" step="0.01" required defaultValue={grade?.score} /></label><label className="form-field"><span>Barème</span><input name="maxScore" type="number" min="0.01" max="1000" step="0.01" required defaultValue={grade?.maxScore ?? 20} /></label><label className="form-field"><span>Date</span><input name="gradedAt" type="date" required defaultValue={grade?.gradedAt || new Date().toISOString().slice(0, 10)} /></label>{data.user.role !== 'teacher' ? <label className="form-field"><span>Enseignant</span><select name="teacherId" defaultValue={grade?.teacherId ?? ''}><option value="">Non précisé</option>{data.teachers.map((item) => <option value={item.id} key={item.id}>{item.fullName}</option>)}</select></label> : null}<label className="form-field form-field-wide"><span>Appréciation</span><textarea name="appreciation" maxLength={1000} defaultValue={grade?.appreciation} /></label></div><div className="inline-form-footer"><span>Une même évaluation est unique par élève, matière et période.</span><Button type="submit">Enregistrer et recalculer</Button></div></ActionForm> }
+function SubjectForm({ subject, onDone }: { subject?: Subject; onDone?: () => void }) { return <ActionForm action={saveSubject} className="inline-form" onSuccess={onDone} resetOnSuccess={!subject}><HiddenId id={subject?.id} /><div className="inline-form-heading"><div><p className="eyebrow">MATIÈRE ET COEFFICIENT</p><h2>{subject ? 'Modifier la matière' : 'Nouvelle matière'}</h2></div></div><div className="form-grid form-grid-2"><label className="form-field"><span>Nom</span><input name="name" required maxLength={120} defaultValue={subject?.name} /></label><label className="form-field"><span>Coefficient</span><input name="coefficient" type="number" min="0.01" max="100" step="0.01" required defaultValue={subject?.coefficient ?? 1} /></label></div><div className="inline-form-footer"><span>Utilisé pour la moyenne générale du bulletin</span><Button type="submit">Enregistrer</Button></div></ActionForm> }
+function Bulletin({ data, report }: { data: SchoolData; report: ReportCard }) { return <article className="bulletin-document"><div className="bulletin-document-header"><div className="bulletin-brand-block"><BrandLockup className="bulletin-brand-art" /><p className="bulletin-school-line">{data.school.name} · {data.school.city}</p></div><div className="bulletin-period"><span>ANNÉE SCOLAIRE</span><strong>{data.settings.academicYear}</strong><span>{report.term}</span></div></div><div className="bulletin-rule" /><p className="eyebrow">BULLETIN DE NOTES</p><h2>Relevé des évaluations</h2><dl className="bulletin-student-details"><div><dt>Élève</dt><dd>{report.studentName}</dd></div><div><dt>Classe</dt><dd>{report.className}</dd></div><div><dt>Moyenne générale</dt><dd>{report.average === null ? 'Non calculable' : `${report.average}/20`}</dd></div></dl><table className="bulletin-table"><thead><tr><th>Matière</th><th>Évaluations</th><th>Coefficient</th><th>Moyenne /20</th></tr></thead><tbody>{report.rows.map((row) => <tr key={row.subjectId}><td>{row.subject}</td><td>{row.assessmentCount}</td><td>{row.coefficient}</td><td><strong>{row.average}</strong></td></tr>)}</tbody></table>{!report.rows.length ? <p>Aucune note enregistrée pour cette période.</p> : null}<section className="bulletin-appreciation"><h3>Décision de référence</h3><p>{report.average === null ? 'Moyenne non disponible.' : report.average >= data.settings.passingAverage ? `Moyenne supérieure ou égale au seuil de ${data.settings.passingAverage}/20.` : `Moyenne inférieure au seuil de ${data.settings.passingAverage}/20.`}</p></section><div className="bulletin-signatures"><span>Le professeur principal</span><span>La direction</span></div></article> }
