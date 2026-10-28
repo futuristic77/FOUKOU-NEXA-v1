@@ -1,111 +1,41 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { CalendarDays, Check, Clock3, UsersRound } from 'lucide-react'
+import { useState } from 'react'
+import { CalendarDays, Check, Plus, Trash2, UsersRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { demoStudents } from './data'
-import type { Student } from './types'
-import { DemoNotice, EmptyState, PageHeading } from './shared'
+import { deleteAttendance, deleteSchedule, saveAttendance, saveSchedule } from '@/app/actions'
+import { hasPermission } from '@/lib/permissions.mjs'
+import type { Attendance, Schedule, SchoolData } from './types'
+import { ActionForm, HiddenId } from './action-form'
+import { EmptyState, PageHeading } from './shared'
 
-type Lesson = { subject: string; className: string; teacher: string; room: string }
+const days = ['', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+const statusLabels = { present: 'Présent', absent: 'Absent', late: 'Retard', excused: 'Absence excusée' }
 
-const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi']
-const slots = [
-  { time: '08:00', label: '08h00–09h00' },
-  { time: '09:00', label: '09h00–10h00' },
-  { time: '10:30', label: '10h30–11h30' },
-  { time: '13:00', label: '13h00–14h00' },
-  { time: '14:00', label: '14h00–15h00' },
-]
-
-const lessons: { day: string; time: string; lesson: Lesson }[] = [
-  { day: 'Lundi', time: '08:00', lesson: { subject: 'Mathématiques', className: '5e B', teacher: 'K. Kouamé', room: 'Salle 12' } },
-  { day: 'Lundi', time: '09:00', lesson: { subject: 'Français', className: '6e A', teacher: 'S. Touré', room: 'Salle 04' } },
-  { day: 'Lundi', time: '10:30', lesson: { subject: 'Sciences physiques', className: '4e C', teacher: 'Y. Koné', room: 'Laboratoire' } },
-  { day: 'Lundi', time: '13:00', lesson: { subject: 'Histoire-géographie', className: '5e B', teacher: 'M. Diallo', room: 'Salle 12' } },
-  { day: 'Mardi', time: '08:00', lesson: { subject: 'Anglais', className: '6e A', teacher: 'A. N’Dri', room: 'Salle 04' } },
-  { day: 'Mardi', time: '09:00', lesson: { subject: 'Mathématiques', className: '4e C', teacher: 'K. Kouamé', room: 'Salle 08' } },
-  { day: 'Mardi', time: '10:30', lesson: { subject: 'Français', className: '3e A', teacher: 'S. Touré', room: 'Salle 02' } },
-  { day: 'Mardi', time: '14:00', lesson: { subject: 'Éducation physique', className: '5e B', teacher: 'A. Bamba', room: 'Terrain' } },
-  { day: 'Mercredi', time: '08:00', lesson: { subject: 'Sciences physiques', className: '2nde C', teacher: 'Y. Koné', room: 'Laboratoire' } },
-  { day: 'Mercredi', time: '10:30', lesson: { subject: 'Anglais', className: '2nde C', teacher: 'A. N’Dri', room: 'Salle 16' } },
-  { day: 'Mercredi', time: '13:00', lesson: { subject: 'Mathématiques', className: '5e B', teacher: 'K. Kouamé', room: 'Salle 12' } },
-  { day: 'Jeudi', time: '08:00', lesson: { subject: 'Français', className: '6e A', teacher: 'S. Touré', room: 'Salle 04' } },
-  { day: 'Jeudi', time: '09:00', lesson: { subject: 'Histoire-géographie', className: '3e A', teacher: 'M. Diallo', room: 'Salle 02' } },
-  { day: 'Jeudi', time: '13:00', lesson: { subject: 'Mathématiques', className: '4e C', teacher: 'K. Kouamé', room: 'Salle 08' } },
-  { day: 'Vendredi', time: '08:00', lesson: { subject: 'Sciences physiques', className: '4e C', teacher: 'Y. Koné', room: 'Laboratoire' } },
-  { day: 'Vendredi', time: '10:30', lesson: { subject: 'Anglais', className: '6e A', teacher: 'A. N’Dri', room: 'Salle 04' } },
-  { day: 'Vendredi', time: '13:00', lesson: { subject: 'Éducation physique', className: '5e B', teacher: 'A. Bamba', room: 'Terrain' } },
-]
-
-export function ScheduleView({ students = demoStudents }: { students?: Student[] }) {
-  const [activeTab, setActiveTab] = useState<'schedule' | 'attendance'>('schedule')
-  const [classFilter, setClassFilter] = useState('Toutes les classes')
-  const [selectedDay, setSelectedDay] = useState('Lundi')
-  const [attendance, setAttendance] = useState<Record<string, boolean>>(() => Object.fromEntries(demoStudents.map((student, index) => [student.id, index !== 2])))
-  const classOptions = Array.from(new Set(students.map((student) => student.className)))
-
-  const visibleLessons = useMemo(() => lessons.filter(({ lesson }) => classFilter === 'Toutes les classes' || lesson.className === classFilter), [classFilter])
-  const attendanceRows = students.filter((student) => classFilter === 'Toutes les classes' || student.className === classFilter)
-  const presentCount = attendanceRows.filter((student) => attendance[student.id] !== false).length
-  const presentRate = attendanceRows.length ? Math.round((presentCount / attendanceRows.length) * 100) : 0
-  const todayLessons = visibleLessons.filter((item) => item.day === selectedDay).sort((a, b) => a.time.localeCompare(b.time))
-
-  function lessonFor(day: string, time: string) {
-    return visibleLessons.find((item) => item.day === day && item.time === time)?.lesson
-  }
-
-  return (
-    <div className="section-view">
-      <PageHeading
-        eyebrow="ORGANISATION SCOLAIRE · APERÇU"
-        title="Présences et emplois du temps"
-        description="Consultez les cours de la semaine et explorez l’appel de présence sur un affichage tactile."
-      />
-      <DemoNotice>Planning et présences fictifs. Les changements d’appel ne sont visibles que dans cette session et ne sont pas transmis à l’établissement.</DemoNotice>
-
-      <div className="schedule-controls-row">
-        <div className="management-tabs schedule-tabs" role="tablist" aria-label="Choisir une vue">
-          <button type="button" role="tab" aria-selected={activeTab === 'schedule'} className={activeTab === 'schedule' ? 'is-selected' : ''} onClick={() => setActiveTab('schedule')}><CalendarDays aria-hidden="true" />Emploi du temps</button>
-          <button type="button" role="tab" aria-selected={activeTab === 'attendance'} className={activeTab === 'attendance' ? 'is-selected' : ''} onClick={() => setActiveTab('attendance')}><Check aria-hidden="true" />Présences</button>
-        </div>
-        <label className="form-field compact-form-field schedule-class-filter"><span>Classe</span><select value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option>Toutes les classes</option>{classOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
-      </div>
-
-      {activeTab === 'schedule' ? (
-        <Card className="schedule-card">
-          <CardHeader className="schedule-card-header"><div><p className="eyebrow">SEMAINE DU 26 OCTOBRE 2026 · DÉMO</p><CardTitle>Planning hebdomadaire</CardTitle></div><div className="schedule-legend"><span><i className="legend-dot lesson-dot-green" />Cours</span><span><i className="legend-dot lesson-dot-bronze" />Évaluation</span></div></CardHeader>
-          <CardContent>
-            <div className="table-scroll timetable-desktop">
-              <table className="timetable-table">
-                <thead><tr><th scope="col">Horaire</th>{days.map((day) => <th scope="col" key={day}>{day}</th>)}</tr></thead>
-                <tbody>{slots.map((slot) => <tr key={slot.time}><th scope="row"><span>{slot.label}</span></th>{days.map((day) => {
-                  const lesson = lessonFor(day, slot.time)
-                  return <td key={day}>{lesson ? <div className={`lesson-block ${lesson.subject.includes('Sciences') ? 'lesson-block-alt' : ''}`}><strong>{lesson.subject}</strong><span>{lesson.className} · {lesson.room}</span><small>{lesson.teacher}</small></div> : <span className="empty-slot" aria-label="Aucun cours">—</span>}</td>
-                })}</tr>)}</tbody>
-              </table>
-              {visibleLessons.length === 0 ? <EmptyState title="Aucun cours pour cette classe" description="Choisissez une autre classe dans les filtres." /> : null}
-            </div>
-
-            <div className="timetable-mobile">
-              <label className="form-field compact-form-field"><span>Jour</span><select value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)}>{days.map((day) => <option key={day}>{day}</option>)}</select></label>
-              {todayLessons.length ? <div className="day-lesson-list">{todayLessons.map(({ time, lesson }) => <article className="day-lesson-card" key={`${selectedDay}-${time}`}><time>{slots.find((slot) => slot.time === time)?.label}</time><div><strong>{lesson.subject}</strong><span>{lesson.className} · {lesson.room}</span><small>{lesson.teacher}</small></div></article>)}</div> : <EmptyState title="Aucun cours prévu" description="Aucun cours de démonstration n’est programmé pour ce jour et cette classe." />}
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="attendance-layout">
-          <Card className="attendance-summary-card"><CardHeader className="panel-heading"><div className="panel-title-wrap"><span className="panel-title-icon"><UsersRound aria-hidden="true" /></span><CardTitle>Appel de présence</CardTitle></div><span className="small-demo-tag">SESSION</span></CardHeader><CardContent><p className="attendance-date"><Clock3 aria-hidden="true" />Lundi 26 octobre 2026 · matin</p><div className="attendance-rate"><strong>{presentRate}<small>%</small></strong><span>présence · exemple modifiable</span></div><div className="attendance-progress" role="progressbar" aria-label="Taux de présence de démonstration" aria-valuenow={presentRate} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${presentRate}%` }} /></div><p className="attendance-count">{presentCount} présents sur {attendanceRows.length} élèves affichés</p><p className="attendance-disclaimer">Cet appel n’est ni sauvegardé ni transmis.</p></CardContent></Card>
-          <Card className="attendance-list-card"><CardHeader className="panel-heading"><div className="panel-title-wrap"><span className="panel-title-icon"><Check aria-hidden="true" /></span><CardTitle>Liste de classe · démo</CardTitle></div><span className="small-demo-tag">{attendanceRows.length} DOSSIERS</span></CardHeader><CardContent className="attendance-rows">
-            {attendanceRows.map((student) => {
-              const isPresent = attendance[student.id] !== false
-              return <div className="attendance-row" key={student.id}><span className="attendance-avatar" aria-hidden="true">{student.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div className="attendance-student"><strong>{student.name}</strong><span>{student.className} · {student.id}</span></div><span className={`status-pill ${isPresent ? 'status-positive' : 'status-absent'}`}><span aria-hidden="true" />{isPresent ? 'Présent' : 'Absent'}</span><Button variant={isPresent ? 'outline' : 'secondary'} size="sm" aria-pressed={!isPresent} aria-label={`${isPresent ? 'Marquer absent' : 'Marquer présent'} : ${student.name}`} onClick={() => setAttendance((current) => ({ ...current, [student.id]: !isPresent }))}>{isPresent ? 'Marquer absent' : 'Marquer présent'}</Button></div>
-            })}
-            {attendanceRows.length === 0 ? <EmptyState title="Aucun élève dans ce filtre" description="Choisissez une classe avec des dossiers de démonstration." /> : null}
-          </CardContent></Card>
-        </div>
-      )}
-    </div>
-  )
+export function ScheduleView({ data }: { data: SchoolData }) {
+  const [tab, setTab] = useState<'schedule' | 'attendance'>('schedule')
+  const [classFilter, setClassFilter] = useState(data.classes[0]?.id ?? '')
+  const [selectedDay, setSelectedDay] = useState(1)
+  const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().slice(0, 10))
+  const [formOpen, setFormOpen] = useState(false)
+  const canSchedule = hasPermission(data.user.role, 'schedules:write')
+  const canAttendance = hasPermission(data.user.role, 'attendance:write')
+  const canWrite = tab === 'schedule' ? canSchedule : canAttendance
+  const schedules = data.schedules.filter((item) => !classFilter || item.classId === classFilter)
+  const attendance = data.attendance.filter((item) => item.attendanceDate === attendanceDate && (!classFilter || item.classId === classFilter))
+  const slots = Array.from(new Set(schedules.map((item) => item.startsAt))).sort()
+  const present = attendance.filter((item) => item.status === 'present' || item.status === 'late').length
+  const rate = attendance.length ? Math.round((present / attendance.length) * 100) : null
+  return <div className="section-view"><PageHeading eyebrow="ORGANISATION SCOLAIRE" title="Présences et emplois du temps" description="Planifiez les cours et enregistrez un appel quotidien par élève." actions={canWrite ? <Button onClick={() => setFormOpen((value) => !value)}><Plus data-icon="inline-start" aria-hidden="true" />{tab === 'schedule' ? 'Ajouter un cours' : 'Enregistrer une présence'}</Button> : undefined} />
+    <div className="schedule-controls-row"><div className="management-tabs schedule-tabs" role="tablist"><button type="button" role="tab" aria-selected={tab === 'schedule'} className={tab === 'schedule' ? 'is-selected' : ''} onClick={() => { setTab('schedule'); setFormOpen(false) }}><CalendarDays aria-hidden="true" />Emploi du temps</button><button type="button" role="tab" aria-selected={tab === 'attendance'} className={tab === 'attendance' ? 'is-selected' : ''} onClick={() => { setTab('attendance'); setFormOpen(false) }}><Check aria-hidden="true" />Présences</button></div><label className="form-field compact-form-field schedule-class-filter"><span>Classe</span><select value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option value="">Toutes les classes</option>{data.classes.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>{tab === 'attendance' ? <label className="form-field compact-form-field"><span>Date</span><input type="date" value={attendanceDate} onChange={(event) => setAttendanceDate(event.target.value)} /></label> : null}</div>
+    {formOpen && tab === 'schedule' && canSchedule ? <ScheduleForm data={data} classId={classFilter} onDone={() => setFormOpen(false)} /> : null}{formOpen && tab === 'attendance' && canAttendance ? <AttendanceForm data={data} classId={classFilter} attendanceDate={attendanceDate} onDone={() => setFormOpen(false)} /> : null}
+    {tab === 'schedule' ? <Card className="schedule-card"><CardHeader className="schedule-card-header"><div><p className="eyebrow">PLANNING HEBDOMADAIRE</p><CardTitle>Cours enregistrés</CardTitle></div></CardHeader><CardContent><div className="table-scroll timetable-desktop"><table className="timetable-table"><thead><tr><th>Horaire</th>{days.slice(1, 7).map((day) => <th key={day}>{day}</th>)}</tr></thead><tbody>{slots.map((slot) => <tr key={slot}><th scope="row">{slot}</th>{Array.from({ length: 6 }, (_, index) => index + 1).map((weekday) => { const lessons = schedules.filter((item) => item.weekday === weekday && item.startsAt === slot); return <td key={weekday}>{lessons.length ? lessons.map((lesson) => <Lesson key={lesson.id} lesson={lesson} data={data} canWrite={canSchedule} />) : <span className="empty-slot">—</span>}</td> })}</tr>)}</tbody></table>{!schedules.length ? <EmptyState title="Aucun cours planifié" description="Ajoutez un cours pour construire l’emploi du temps." /> : null}</div><div className="timetable-mobile"><label className="form-field compact-form-field"><span>Jour</span><select value={selectedDay} onChange={(event) => setSelectedDay(Number(event.target.value))}>{days.slice(1).map((day, index) => <option value={index + 1} key={day}>{day}</option>)}</select></label><div className="day-lesson-list">{schedules.filter((item) => item.weekday === selectedDay).map((lesson) => <article className="day-lesson-card" key={lesson.id}><time>{lesson.startsAt}–{lesson.endsAt}</time><div><strong>{lesson.subjectName}</strong><span>{lesson.className} · {lesson.room || 'Salle non précisée'}</span><small>{lesson.teacherName}</small></div>{canSchedule ? <ScheduleEditor data={data} lesson={lesson} /> : null}</article>)}</div></div></CardContent></Card> : <div className="attendance-layout"><Card className="attendance-summary-card"><CardHeader className="panel-heading"><div className="panel-title-wrap"><span className="panel-title-icon"><UsersRound aria-hidden="true" /></span><CardTitle>Appel du {attendanceDate}</CardTitle></div></CardHeader><CardContent><div className="attendance-rate"><strong>{rate === null ? '—' : rate}<small>{rate === null ? '' : '%'}</small></strong><span>présence enregistrée</span></div>{rate !== null ? <div className="attendance-progress" role="progressbar" aria-valuenow={rate} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${rate}%` }} /></div> : null}<p className="attendance-count">{present} présents ou en retard sur {attendance.length} enregistrements</p><p className="attendance-disclaimer">Les retards sont inclus dans le taux de présence ; les absences excusées n’en font pas partie.</p></CardContent></Card><Card className="attendance-list-card"><CardHeader className="panel-heading"><CardTitle>Registre de présence</CardTitle><span className="small-demo-tag">{attendance.length} LIGNES</span></CardHeader><CardContent className="attendance-rows">{attendance.map((record) => <div className="attendance-row" key={record.id}><span className="attendance-avatar" aria-hidden="true">{record.studentName.slice(0, 2).toUpperCase()}</span><div className="attendance-student"><strong>{record.studentName}</strong><span>{record.className} · {record.notes || 'Sans note'}</span></div><span className={`status-pill ${record.status === 'present' || record.status === 'late' ? 'status-positive' : 'status-absent'}`}><span />{statusLabels[record.status]}</span>{canAttendance ? <AttendanceEditor data={data} record={record} /> : null}</div>)}{!attendance.length ? <EmptyState title="Aucun appel pour cette date" description="Enregistrez la présence des élèves avec le bouton ci-dessus." /> : null}</CardContent></Card></div>}
+  </div>
 }
+
+function ScheduleForm({ data, lesson, classId, onDone }: { data: SchoolData; lesson?: Schedule; classId?: string; onDone?: () => void }) { return <ActionForm action={saveSchedule} className="inline-form" onSuccess={onDone} resetOnSuccess={!lesson}><HiddenId id={lesson?.id} /><div className="inline-form-heading"><div><p className="eyebrow">EMPLOI DU TEMPS</p><h2>{lesson ? 'Modifier le cours' : 'Ajouter un cours'}</h2></div></div><div className="form-grid form-grid-3"><label className="form-field"><span>Classe</span><select name="classId" required defaultValue={lesson?.classId ?? classId ?? ''}><option value="" disabled>Choisir</option>{data.classes.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label className="form-field"><span>Matière</span><select name="subjectId" required defaultValue={lesson?.subjectId ?? ''}><option value="" disabled>Choisir</option>{data.subjects.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label className="form-field"><span>Enseignant</span><select name="teacherId" defaultValue={lesson?.teacherId ?? ''}><option value="">À affecter</option>{data.teachers.map((item) => <option value={item.id} key={item.id}>{item.fullName}</option>)}</select></label><label className="form-field"><span>Jour</span><select name="weekday" defaultValue={lesson?.weekday ?? 1}>{days.slice(1).map((day, index) => <option value={index + 1} key={day}>{day}</option>)}</select></label><label className="form-field"><span>Début</span><input name="startsAt" type="time" required defaultValue={lesson?.startsAt ?? '08:00'} /></label><label className="form-field"><span>Fin</span><input name="endsAt" type="time" required defaultValue={lesson?.endsAt ?? '09:00'} /></label><label className="form-field"><span>Salle</span><input name="room" maxLength={80} defaultValue={lesson?.room} /></label></div><div className="inline-form-footer"><span>Les chevauchements à heure de début identique sont refusés pour une classe.</span><Button type="submit">Enregistrer</Button></div></ActionForm> }
+function ScheduleEditor({ data, lesson }: { data: SchoolData; lesson: Schedule }) { return <div className="record-actions"><details className="record-editor"><summary>Modifier</summary><ScheduleForm data={data} lesson={lesson} /></details><ActionForm action={deleteSchedule} confirm="Supprimer ce cours ?"><HiddenId id={lesson.id} /><Button type="submit" variant="ghost" size="sm" aria-label="Supprimer"><Trash2 aria-hidden="true" /></Button></ActionForm></div> }
+function Lesson({ lesson, data, canWrite }: { lesson: Schedule; data: SchoolData; canWrite: boolean }) { return <div className="lesson-block"><strong>{lesson.subjectName}</strong><span>{lesson.className} · {lesson.room || '—'}</span><small>{lesson.teacherName} · jusqu’à {lesson.endsAt}</small>{canWrite ? <ScheduleEditor data={data} lesson={lesson} /> : null}</div> }
+function AttendanceForm({ data, record, classId, attendanceDate, onDone }: { data: SchoolData; record?: Attendance; classId?: string; attendanceDate?: string; onDone?: () => void }) { return <ActionForm action={saveAttendance} className="inline-form" onSuccess={onDone} resetOnSuccess={!record}><HiddenId id={record?.id} /><div className="inline-form-heading"><div><p className="eyebrow">PRÉSENCE</p><h2>{record ? 'Modifier l’enregistrement' : 'Enregistrer une présence'}</h2></div></div><div className="form-grid form-grid-3"><label className="form-field"><span>Élève</span><select name="studentId" required defaultValue={record?.studentId ?? ''}><option value="" disabled>Choisir</option>{data.students.filter((item) => !classId || item.classId === classId).map((item) => <option value={item.id} key={item.id}>{item.fullName} · {item.className}</option>)}</select></label><label className="form-field"><span>Date</span><input name="attendanceDate" type="date" required defaultValue={record?.attendanceDate ?? attendanceDate} /></label><label className="form-field"><span>Statut</span><select name="status" defaultValue={record?.status ?? 'present'}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label className="form-field form-field-wide"><span>Note</span><input name="notes" maxLength={500} defaultValue={record?.notes} /></label></div><div className="inline-form-footer"><span>Un second enregistrement à la même date met à jour l’appel existant.</span><Button type="submit">Enregistrer</Button></div></ActionForm> }
+function AttendanceEditor({ data, record }: { data: SchoolData; record: Attendance }) { return <div className="record-actions"><details className="record-editor"><summary>Modifier</summary><AttendanceForm data={data} record={record} /></details><ActionForm action={deleteAttendance} confirm="Supprimer cet enregistrement de présence ?"><HiddenId id={record.id} /><Button type="submit" variant="ghost" size="sm" aria-label="Supprimer"><Trash2 aria-hidden="true" /></Button></ActionForm></div> }

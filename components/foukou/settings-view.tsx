@@ -1,106 +1,36 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
-import { Check, Info, Save, Settings2 } from 'lucide-react'
+import { useState } from 'react'
+import { Check, Save, Settings2, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { DemoNotice, PageHeading } from './shared'
+import { deleteSchool, deleteUser, saveSchool, saveSettings, saveUser } from '@/app/actions'
+import { hasPermission, roleLabels } from '@/lib/permissions.mjs'
+import type { Role, SchoolData, UserAccount } from './types'
+import { ActionForm, HiddenId } from './action-form'
+import { EmptyState, PageHeading } from './shared'
 
-type SettingsTab = 'establishment' | 'year' | 'grading' | 'roles'
+type Tab = 'establishment' | 'year' | 'roles'
+const tabs: { key: Tab; label: string }[] = [{ key: 'establishment', label: 'Établissement' }, { key: 'year', label: 'Année et calculs' }, { key: 'roles', label: 'Comptes et accès' }]
 
-type SettingsDraft = {
-  establishment: string
-  city: string
-  year: string
-  startDate: string
-  endDate: string
-  coefficient1: string
-  coefficient2: string
-  coefficient3: string
-}
-
-const initialSettings: SettingsDraft = {
-  establishment: 'Établissement de démonstration',
-  city: 'Abidjan',
-  year: '2026–2027',
-  startDate: '2026-09-07',
-  endDate: '2027-06-30',
-  coefficient1: '1',
-  coefficient2: '1',
-  coefficient3: '2',
-}
-
-const tabs: { key: SettingsTab; label: string }[] = [
-  { key: 'establishment', label: 'Établissement' },
-  { key: 'year', label: 'Année scolaire' },
-  { key: 'grading', label: 'Règles de calcul' },
-  { key: 'roles', label: 'Rôles et accès' },
-]
-
-export function SettingsView() {
-  const [tab, setTab] = useState<SettingsTab>('establishment')
-  const [draft, setDraft] = useState(initialSettings)
-  const [applied, setApplied] = useState(initialSettings)
-  const [message, setMessage] = useState('')
-
-  function updateField(key: keyof SettingsDraft, value: string) {
-    setDraft((current) => ({ ...current, [key]: value }))
-    setMessage('')
-  }
-
-  function applyPreview(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setApplied(draft)
-    setMessage('Modifications appliquées à cet aperçu uniquement. Aucune sauvegarde durable n’est configurée.')
-  }
-
-  return (
-    <div className="section-view">
-      <PageHeading
-        eyebrow="CONFIGURATION · APERÇU"
-        title="Paramètres"
-        description="Informations de l’établissement, périodes scolaires, calcul des moyennes et rôles."
-      />
-      <DemoNotice>Les paramètres sont modifiables localement pour visualiser l’interface. Ils ne sont ni persistés ni appliqués à des comptes réels.</DemoNotice>
-
-      <div className="settings-layout">
-        <Card className="settings-navigation-card">
-          <CardHeader className="settings-nav-heading"><span className="panel-title-icon"><Settings2 aria-hidden="true" /></span><CardTitle>Configuration</CardTitle></CardHeader>
-          <CardContent className="settings-tabs" role="tablist" aria-label="Catégories de paramètres">
-            {tabs.map((item) => <button type="button" key={item.key} role="tab" aria-selected={tab === item.key} className={tab === item.key ? 'is-selected' : ''} onClick={() => { setTab(item.key); setMessage('') }}>{item.label}</button>)}
-          </CardContent>
-          <p className="settings-applied-preview"><span className="settings-preview-dot" />{applied.establishment}</p>
-        </Card>
-
-        <Card className="settings-panel">
-          <CardHeader className="settings-panel-heading"><div><p className="eyebrow">{tabs.find((item) => item.key === tab)?.label.toLocaleUpperCase('fr-FR')}</p><CardTitle>{tab === 'establishment' ? 'Profil de l’établissement' : tab === 'year' ? 'Calendrier scolaire' : tab === 'grading' ? 'Moyennes et coefficients' : 'Aperçu des accès'}</CardTitle></div><span className="small-demo-tag">NON PERSISTANT</span></CardHeader>
-          {message ? <p className="session-message" role="status">{message}</p> : null}
-
-          {tab === 'roles' ? (
-            <CardContent className="roles-content">
-              <div className="permission-alert"><Info aria-hidden="true" /><p><strong>Aperçu d’interface seulement.</strong> Ces rôles ne protègent aucune donnée. L’application n’est reliée à aucun système d’authentification ni contrôle d’accès serveur.</p></div>
-              <div className="table-scroll">
-                <table className="data-table roles-table"><thead><tr><th scope="col">Rôle illustré</th><th scope="col">Élèves</th><th scope="col">Notes</th><th scope="col">Présences</th><th scope="col">Paramètres</th></tr></thead><tbody><tr><th scope="row">Direction</th><td><Check aria-label="Inclus dans la maquette" /></td><td><Check aria-label="Inclus dans la maquette" /></td><td><Check aria-label="Inclus dans la maquette" /></td><td><Check aria-label="Inclus dans la maquette" /></td></tr><tr><th scope="row">Enseignant</th><td>Lecture</td><td>Saisie</td><td>Saisie</td><td>—</td></tr><tr><th scope="row">Vie scolaire</th><td>Lecture</td><td>—</td><td>Saisie</td><td>—</td></tr></tbody></table>
-              </div>
-            </CardContent>
-          ) : (
-            <CardContent>
-              <form className="settings-form" onSubmit={applyPreview}>
-                {tab === 'establishment' ? (
-                  <div className="form-grid form-grid-2"><label className="form-field form-field-wide"><span>Nom de l’établissement</span><input value={draft.establishment} onChange={(event) => updateField('establishment', event.target.value)} required /></label><label className="form-field"><span>Ville</span><input value={draft.city} onChange={(event) => updateField('city', event.target.value)} required /></label><label className="form-field"><span>Pays</span><select defaultValue="Côte d’Ivoire"><option>Côte d’Ivoire</option><option>Sénégal</option><option>Autre</option></select></label><div className="settings-preview-callout"><span className="settings-preview-dot" /><div><strong>Nom dans l’aperçu</strong><span>{draft.establishment} · {draft.city}</span></div></div></div>
-                ) : null}
-                {tab === 'year' ? (
-                  <div className="form-grid form-grid-2"><label className="form-field"><span>Année scolaire</span><input value={draft.year} onChange={(event) => updateField('year', event.target.value)} required /></label><label className="form-field"><span>Rythme</span><select defaultValue="Trimestres"><option>Trimestres</option><option>Semestres</option></select></label><label className="form-field"><span>Date de rentrée</span><input type="date" value={draft.startDate} onChange={(event) => updateField('startDate', event.target.value)} /></label><label className="form-field"><span>Fin de l’année</span><input type="date" value={draft.endDate} onChange={(event) => updateField('endDate', event.target.value)} /></label></div>
-                ) : null}
-                {tab === 'grading' ? (
-                  <div className="grading-settings"><p>Les coefficients servent à illustrer le calcul affiché dans Notes et bulletins.</p><div className="form-grid form-grid-3"><label className="form-field"><span>Évaluation 1 · coefficient</span><input type="number" min="0.25" step="0.25" value={draft.coefficient1} onChange={(event) => updateField('coefficient1', event.target.value)} /></label><label className="form-field"><span>Évaluation 2 · coefficient</span><input type="number" min="0.25" step="0.25" value={draft.coefficient2} onChange={(event) => updateField('coefficient2', event.target.value)} /></label><label className="form-field"><span>Évaluation 3 · coefficient</span><input type="number" min="0.25" step="0.25" value={draft.coefficient3} onChange={(event) => updateField('coefficient3', event.target.value)} /></label></div><div className="settings-preview-callout"><span className="settings-preview-dot" /><div><strong>Barème de démonstration</strong><span>Notes sur 20 · arrondi au dixième</span></div></div></div>
-                ) : null}
-                <div className="settings-form-footer"><span>Application à l’aperçu local uniquement</span><Button type="submit"><Save data-icon="inline-start" aria-hidden="true" />Appliquer à l’aperçu</Button></div>
-              </form>
-            </CardContent>
-          )}
-        </Card>
-      </div>
+export function SettingsView({ data }: { data: SchoolData }) {
+  const [tab, setTab] = useState<Tab>('establishment')
+  const canSettings = hasPermission(data.user.role, 'settings:write')
+  const canSchool = hasPermission(data.user.role, 'school:update')
+  const canUsers = hasPermission(data.user.role, 'users:write')
+  return <div className="section-view"><PageHeading eyebrow="CONFIGURATION" title="Paramètres" description="Informations de l’établissement, période scolaire, seuil de réussite et comptes utilisateurs." />
+    <div className="settings-layout"><Card className="settings-navigation-card"><CardHeader className="settings-nav-heading"><span className="panel-title-icon"><Settings2 aria-hidden="true" /></span><CardTitle>Configuration</CardTitle></CardHeader><CardContent className="settings-tabs" role="tablist">{tabs.map((item) => <button type="button" key={item.key} role="tab" aria-selected={tab === item.key} className={tab === item.key ? 'is-selected' : ''} onClick={() => setTab(item.key)}>{item.label}</button>)}</CardContent><p className="settings-applied-preview"><span className="settings-preview-dot" />{data.school.name}</p></Card>
+      <Card className="settings-panel"><CardHeader className="settings-panel-heading"><div><p className="eyebrow">{tabs.find((item) => item.key === tab)?.label.toUpperCase()}</p><CardTitle>{tab === 'establishment' ? 'Profil de l’établissement' : tab === 'year' ? 'Calendrier et moyennes' : 'Comptes et permissions'}</CardTitle></div></CardHeader><CardContent>
+        {tab === 'establishment' ? <><ActionForm action={saveSchool} className="settings-form"><div className="form-grid form-grid-2"><label className="form-field form-field-wide"><span>Nom de l’établissement</span><input name="name" required minLength={2} maxLength={160} defaultValue={data.school.name} disabled={!canSchool} /></label><label className="form-field"><span>Ville</span><input name="city" required maxLength={120} defaultValue={data.school.city} disabled={!canSchool} /></label><label className="form-field"><span>Pays</span><input name="country" required maxLength={120} defaultValue={data.school.country} disabled={!canSchool} /></label></div>{canSchool ? <div className="settings-form-footer"><span>Modifications appliquées à tout l’espace</span><Button type="submit"><Save data-icon="inline-start" aria-hidden="true" />Enregistrer</Button></div> : null}</ActionForm>{canSchool ? <details className="danger-zone"><summary>Zone de suppression</summary><p>Cette action supprime définitivement l’établissement et toutes ses données.</p><ActionForm action={deleteSchool} confirm="Confirmez-vous la suppression définitive de tout l’établissement ?"><label className="form-field"><span>Saisir SUPPRIMER</span><input name="confirmation" required pattern="SUPPRIMER" /></label><Button type="submit" variant="destructive">Supprimer l’établissement</Button></ActionForm></details> : null}</> : null}
+        {tab === 'year' ? <ActionForm action={saveSettings} className="settings-form"><div className="form-grid form-grid-2"><label className="form-field"><span>Année scolaire</span><input name="academicYear" required maxLength={20} defaultValue={data.settings.academicYear} disabled={!canSettings} /></label><label className="form-field"><span>Période active</span><input name="currentTerm" required maxLength={50} defaultValue={data.settings.currentTerm} disabled={!canSettings} /></label><label className="form-field"><span>Rythme</span><select name="periodType" defaultValue={data.settings.periodType} disabled={!canSettings}><option value="trimester">Trimestres</option><option value="semester">Semestres</option></select></label><label className="form-field"><span>Moyenne de passage /20</span><input name="passingAverage" type="number" min="0" max="20" step="0.01" required defaultValue={data.settings.passingAverage} disabled={!canSettings} /></label><label className="form-field"><span>Date de rentrée</span><input name="yearStart" type="date" defaultValue={data.settings.yearStart} disabled={!canSettings} /></label><label className="form-field"><span>Fin de l’année</span><input name="yearEnd" type="date" defaultValue={data.settings.yearEnd} disabled={!canSettings} /></label></div>{canSettings ? <div className="settings-form-footer"><span>Les bulletins utilisent la période active et ce seuil.</span><Button type="submit"><Save data-icon="inline-start" aria-hidden="true" />Enregistrer</Button></div> : null}</ActionForm> : null}
+        {tab === 'roles' ? <div className="roles-content"><div className="table-scroll"><table className="data-table roles-table"><thead><tr><th>Rôle</th><th>Périmètre</th></tr></thead><tbody><tr><th>Direction</th><td>Toutes les opérations de l’établissement</td></tr><tr><th>Administration</th><td>Gestion scolaire, hors paramètres et comptes</td></tr><tr><th>Enseignant</th><td>Notes et présences limitées aux affectations</td></tr><tr><th>Vie scolaire</th><td>Élèves, classes, présences, plannings et annonces</td></tr><tr><th>Lecture seule</th><td>Consultation sans modification</td></tr></tbody></table></div>{canUsers ? <UserManager data={data} /> : <p className="permission-note">Seule la direction peut gérer les comptes.</p>}</div> : null}
+      </CardContent></Card>
     </div>
-  )
+  </div>
 }
+
+function UserManager({ data }: { data: SchoolData }) {
+  const [formOpen, setFormOpen] = useState(false)
+  return <section className="user-manager"><div className="inline-form-heading"><div><p className="eyebrow">COMPTES UTILISATEURS</p><h2>Accès à {data.school.name}</h2></div><Button onClick={() => setFormOpen((value) => !value)}><UserPlus data-icon="inline-start" aria-hidden="true" />Créer un compte</Button></div>{formOpen ? <UserForm onDone={() => setFormOpen(false)} /> : null}<div className="table-scroll"><table className="data-table"><thead><tr><th>Nom</th><th>E-mail</th><th>Rôle</th><th>État</th><th>Actions</th></tr></thead><tbody>{data.users.map((user) => <tr key={user.id}><td><strong>{user.fullName}</strong></td><td>{user.email}</td><td>{roleLabels[user.role]}</td><td>{user.active ? <><Check aria-hidden="true" /> Actif</> : 'Désactivé'}</td><td><div className="record-actions"><details className="record-editor"><summary>Modifier</summary><UserForm account={user} /></details>{user.id !== data.user.id ? <ActionForm action={deleteUser} confirm={`Supprimer le compte de ${user.fullName} ?`}><HiddenId id={user.id} /><Button type="submit" variant="ghost" size="sm" aria-label="Supprimer"><Trash2 aria-hidden="true" /></Button></ActionForm> : null}</div></td></tr>)}</tbody></table>{!data.users.length ? <EmptyState title="Aucun compte" description="Créez un compte pour donner accès à l’établissement." /> : null}</div></section>
+}
+function UserForm({ account, onDone }: { account?: UserAccount; onDone?: () => void }) { return <ActionForm action={saveUser} className="inline-form" onSuccess={onDone} resetOnSuccess={!account}><HiddenId id={account?.id} /><div className="form-grid form-grid-3"><label className="form-field"><span>Nom complet</span><input name="fullName" required maxLength={160} defaultValue={account?.fullName} /></label><label className="form-field"><span>E-mail</span><input name="email" type="email" required maxLength={254} defaultValue={account?.email} /></label><label className="form-field"><span>Rôle</span><select name="role" defaultValue={account?.role ?? 'viewer'}>{(['director', 'administration', 'teacher', 'secretary', 'viewer'] as Role[]).map((role) => <option value={role} key={role}>{roleLabels[role]}</option>)}</select></label><label className="form-field"><span>{account ? 'Nouveau mot de passe (facultatif)' : 'Mot de passe initial'}</span><input name="password" type="password" minLength={12} maxLength={256} required={!account} autoComplete="new-password" /></label>{account ? <label className="form-field"><span>Compte actif</span><select name="active" defaultValue={String(account.active)}><option value="true">Oui</option><option value="false">Non</option></select></label> : null}</div><div className="inline-form-footer"><span>12 caractères minimum. Le mot de passe n’est jamais stocké en clair.</span><Button type="submit">Enregistrer le compte</Button></div></ActionForm> }
