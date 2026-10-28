@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { db, logActivity } from '@/lib/db'
 import { requireSchool, requireUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions.mjs'
+import { hasTeacherAssignment } from '@/lib/teacher-scope.mjs'
 import { hashPassword, validatePassword } from '@/lib/password.mjs'
 import { choice, date, email, id, integer, number, optionalText, text, time } from '@/lib/validation'
 import type { ActionResult, Role, SessionUser } from '@/lib/types'
@@ -48,14 +49,12 @@ async function assertTeacherScope(user: SessionUser, schoolId: string, classId: 
   if (user.role !== 'teacher') return
   const sql = db()
   const rows = await sql`
-    SELECT ta.id FROM teacher_assignments ta
+    SELECT ta.class_id AS "classId", ta.subject_id AS "subjectId"
+    FROM teacher_assignments ta
     JOIN teachers t ON t.id = ta.teacher_id
-    JOIN students s ON s.class_id = ta.class_id
-    WHERE t.user_id = ${user.id} AND ta.school_id = ${schoolId} AND ta.class_id = ${classId}
-      AND (${subjectId ?? null}::uuid IS NULL OR ta.subject_id = ${subjectId ?? null})
-    LIMIT 1
+    WHERE t.user_id = ${user.id} AND t.school_id = ${schoolId} AND ta.school_id = ${schoolId}
   `
-  if (!rows.length) throw new Error('Cette classe ou matière ne fait pas partie de vos affectations.')
+  if (!hasTeacherAssignment(rows, classId, subjectId)) throw new Error('Cette classe ou matière ne fait pas partie de vos affectations.')
 }
 
 export async function saveStudent(form: FormData): Promise<ActionResult> {
