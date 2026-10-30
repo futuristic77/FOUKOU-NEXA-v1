@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import postgres from 'postgres'
 import { hashPassword } from '../lib/password.mjs'
 
@@ -12,7 +12,9 @@ try {
   await sql`CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`
   const applied = await sql`SELECT name FROM schema_migrations`
   const appliedNames = new Set(applied.map((row) => row.name))
-  const files = ['001_initial.sql']
+  const files = (await readdir(new URL('../migrations/', import.meta.url)))
+    .filter((file) => /^\d+_[\w-]+\.sql$/.test(file))
+    .sort()
   for (const file of files) {
     if (appliedNames.has(file)) continue
     const schema = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8')

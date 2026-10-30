@@ -12,6 +12,25 @@ test('le schéma couvre les modules métier et les clés d’isolation', async (
   assert.match(schema, /ON DELETE CASCADE/)
 })
 
+test('la migration tenant ajoute et valide des clés étrangères composites', async () => {
+  const migration = await readFile(new URL('../migrations/002_tenant_integrity.sql', import.meta.url), 'utf8')
+  for (const constraint of [
+    'students_school_class_fkey',
+    'teacher_assignments_school_teacher_fkey',
+    'grades_school_student_fkey',
+    'attendance_school_student_fkey',
+    'attendance_school_class_fkey',
+    'schedules_school_class_fkey',
+    'communications_school_author_fkey',
+    'activity_logs_school_actor_fkey',
+  ]) {
+    assert.match(migration, new RegExp(`ADD CONSTRAINT ${constraint}`))
+    assert.match(migration, new RegExp(`VALIDATE CONSTRAINT ${constraint}`))
+  }
+  assert.match(migration, /FOREIGN KEY \(school_id, student_id\)/)
+  assert.match(migration, /REFERENCES students \(school_id, id\)/)
+})
+
 test('connexion PostgreSQL en lecture seule', { skip: !process.env.DATABASE_URL }, async () => {
   const { default: postgres } = await import('postgres')
   const sql = postgres(process.env.DATABASE_URL, { ssl: process.env.DATABASE_SSL === 'disable' ? false : 'require', max: 1, connect_timeout: 5 })

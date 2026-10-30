@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hashPassword, verifyPassword, validatePassword } from '../lib/password.mjs'
 import { canDeleteSchool, hasPermission, matchesSchoolDeletionConfirmation } from '../lib/permissions.mjs'
-import { hasActiveTeacherProfile, hasTeacherAssignment, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
+import { hasActiveTeacherProfile, hasAttendanceClassAccess, hasTeacherAssignment, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
 
 test('scrypt vérifie le bon mot de passe et refuse un autre', async () => {
   const encoded = await hashPassword('un-mot-de-passe-tres-long')
@@ -90,6 +90,14 @@ test('les enseignants ne peuvent écrire que dans leurs affectations exactes', (
   assert.equal(hasTeacherAssignment(assignments, 'class-a', 'french'), false)
   assert.equal(hasTeacherAssignment(assignments, 'class-b', 'math'), false)
   assert.equal(hasTeacherAssignment(assignments, 'class-a'), true)
+})
+
+test('une présence déplacée exige l’affectation à l’ancienne et à la nouvelle classe', () => {
+  const assignments = [{ classId: 'class-a', subjectId: 'math' }, { classId: 'class-b', subjectId: 'french' }]
+  assert.equal(hasAttendanceClassAccess(assignments, 'class-a', 'class-a'), true)
+  assert.equal(hasAttendanceClassAccess(assignments, 'class-a', 'class-b'), true)
+  assert.equal(hasAttendanceClassAccess(assignments, 'class-a', 'class-c'), false)
+  assert.equal(hasAttendanceClassAccess(assignments, 'class-c', 'class-b'), false)
 })
 
 test('les données envoyées à un enseignant sont limitées à ses classes et matières', () => {

@@ -1,4 +1,4 @@
-import postgres, { type Sql } from 'postgres'
+import postgres, { type Sql, type TransactionSql } from 'postgres'
 
 let client: Sql | undefined
 
@@ -17,6 +17,6 @@ export function db(): Sql {
   return client
 }
 
-export async function logActivity(sql: Sql, schoolId: string, actorId: string, kind: string, title: string, detail = '') {
+export async function logActivity(sql: Sql | TransactionSql, schoolId: string, actorId: string, kind: string, title: string, detail = '') {
   await sql`INSERT INTO activity_logs (school_id, actor_id, kind, title, detail) VALUES (${schoolId}, ${actorId}, ${kind}, ${title}, ${detail})`
 }

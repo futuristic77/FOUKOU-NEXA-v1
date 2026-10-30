@@ -1,10 +1,11 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import type { TransactionSql } from 'postgres'
 import { db, logActivity } from '@/lib/db'
 import { requireSchool, requireUser } from '@/lib/auth'
 import { canDeleteSchool, matchesSchoolDeletionConfirmation } from '@/lib/permissions.mjs'
-import { hasTeacherAssignment } from '@/lib/teacher-scope.mjs'
+import { hasAttendanceClassAccess, hasTeacherAssignment } from '@/lib/teacher-scope.mjs'
 import { hashPassword, validatePassword } from '@/lib/password.mjs'
 import { choice, date, email, id, integer, number, optionalText, text, time } from '@/lib/validation'
 import type { ActionResult, Role, SessionUser } from '@/lib/types'
@@ -45,15 +46,22 @@ async function assertStudent(sql: ReturnType<typeof db>, studentId: string, scho
   return rows[0]
 }
 
-async function assertTeacherScope(user: SessionUser, schoolId: string, classId: string, subjectId?: string) {
-  if (user.role !== 'teacher') return
-  const sql = db()
-  const rows = await sql`
+async function getTeacherAssignments(user: SessionUser, schoolId: string, sql: ReturnType<typeof db> | TransactionSql) {
+  if (user.role !== 'teacher') return []
+  return sql`
     SELECT ta.class_id AS "classId", ta.subject_id AS "subjectId"
     FROM teacher_assignments ta
-    JOIN teachers t ON t.id = ta.teacher_id
-    WHERE t.user_id = ${user.id} AND t.school_id = ${schoolId} AND t.status = 'active' AND ta.school_id = ${schoolId}
+    JOIN teachers t ON t.id = ta.teacher_id AND t.school_id = ta.school_id
+    JOIN users u ON u.id = t.user_id AND u.school_id = t.school_id
+    WHERE t.user_id = ${user.id} AND t.school_id = ${schoolId}
+      AND t.status = 'active' AND u.active = true AND ta.school_id = ${schoolId}
+    FOR SHARE OF ta, t, u
   `
+}
+
+async function assertTeacherScope(user: SessionUser, schoolId: string, classId: string, subjectId?: string, sql = db()) {
+  if (user.role !== 'teacher') return
+  const rows = await getTeacherAssignments(user, schoolId, sql)
   if (!hasTeacherAssignment(rows, classId, subjectId)) throw new Error('Cette classe ou matière ne fait pas partie de vos affectations.')
 }
 
@@ -240,20 +248,41 @@ export async function saveAttendance(form: FormData): Promise<ActionResult> {
     const attendanceDate = date(form, 'attendanceDate')!
     const status = choice(form, 'status', ['present', 'absent', 'late', 'excused'] as const)
     const sql = db()
-    const student = await assertStudent(sql, studentId, schoolId)
-    if (attendanceId && user.role === 'teacher') {
-      const existing = await sql`SELECT class_id FROM attendance WHERE id=${attendanceId} AND school_id=${schoolId}`
-      if (!existing.length) throw new Error('Présence introuvable.')
-      await assertTeacherScope(user, schoolId, existing[0].class_id)
-    }
-    await assertTeacherScope(user, schoolId, student.class_id)
-    if (attendanceId) {
-      const result = await sql`UPDATE attendance SET student_id=${studentId}, class_id=${student.class_id}, attendance_date=${attendanceDate}, status=${status}, notes=${optionalText(form, 'notes', 500)}, recorded_by=${user.id}, updated_at=now() WHERE id=${attendanceId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Présence introuvable.')
-    } else {
-      await sql`INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status, notes, recorded_by) VALUES (${schoolId}, ${studentId}, ${student.class_id}, ${attendanceDate}, ${status}, ${optionalText(form, 'notes', 500)}, ${user.id}) ON CONFLICT (student_id, attendance_date) DO UPDATE SET class_id=EXCLUDED.class_id, status=EXCLUDED.status, notes=EXCLUDED.notes, recorded_by=EXCLUDED.recorded_by, updated_at=now()`
-    }
-    await logActivity(sql, schoolId, user.id, 'absence', 'Appel de présence enregistré', `${studentId} · ${attendanceDate}`)
+    await sql.begin(async (tx) => {
+      const existingById = attendanceId
+        ? await tx`SELECT id, student_id, class_id FROM attendance WHERE id=${attendanceId} AND school_id=${schoolId} FOR UPDATE`
+        : []
+      if (attendanceId && !existingById.length) throw new Error('Présence introuvable.')
+      if (existingById.length && existingById[0].student_id !== studentId) {
+        throw new Error('Cette présence appartient à un autre élève.')
+      }
+
+      const studentRows = await tx`SELECT id, class_id FROM students WHERE id=${studentId} AND school_id=${schoolId} FOR SHARE`
+      if (!studentRows.length) throw new Error('Élève introuvable dans cet établissement.')
+      const currentClassId = studentRows[0].class_id
+
+      // Serialize writes for the unique student/date key before checking for an existing record.
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${studentId}:${attendanceDate}`}, 0))`
+      const existingByDate = attendanceId
+        ? []
+        : await tx`SELECT id, class_id FROM attendance WHERE student_id=${studentId} AND attendance_date=${attendanceDate} AND school_id=${schoolId} FOR UPDATE`
+      const existing = existingById[0] ?? existingByDate[0]
+
+      if (user.role === 'teacher') {
+        const assignments = await getTeacherAssignments(user, schoolId, tx)
+        if (!hasAttendanceClassAccess(assignments, existing?.class_id ?? currentClassId, currentClassId)) {
+          throw new Error('Cette classe, ou la classe de l’ancienne présence, ne fait pas partie de vos affectations actives.')
+        }
+      }
+
+      if (existing) {
+        const result = await tx`UPDATE attendance SET class_id=${currentClassId}, attendance_date=${attendanceDate}, status=${status}, notes=${optionalText(form, 'notes', 500)}, recorded_by=${user.id}, updated_at=now() WHERE id=${existing.id} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Présence introuvable.')
+      } else {
+        await tx`INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status, notes, recorded_by) VALUES (${schoolId}, ${studentId}, ${currentClassId}, ${attendanceDate}, ${status}, ${optionalText(form, 'notes', 500)}, ${user.id})`
+      }
+      await logActivity(tx, schoolId, user.id, 'absence', 'Appel de présence enregistré', `${studentId} · ${attendanceDate}`)
+    })
     return 'Présence enregistrée.'
   })
 }

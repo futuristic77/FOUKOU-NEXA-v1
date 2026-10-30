@@ -15,7 +15,7 @@ Application Next.js 16 de gestion scolaire multi-établissements, avec authentif
 
 Prérequis : Node.js 20+, pnpm 12 et PostgreSQL 13+.
 
-1. Installer les dépendances : `pnpm install`.
+1. Installer les dépendances : `pnpm install --frozen-lockfile`.
 2. Copier `.env.example` vers `.env.local` et renseigner `DATABASE_URL`. Ne jamais committer ce fichier.
 3. Pour une base locale sans TLS, définir `DATABASE_SSL=disable`. Pour un hébergeur géré, conserver `DATABASE_SSL=require` et utiliser l’URL TLS fournie.
 4. Exécuter les migrations et créer le premier établissement/compte :
@@ -29,7 +29,7 @@ SEED_ADMIN_PASSWORD='un-mot-de-passe-long-et-unique' \
 pnpm db:migrate
 ```
 
-Les variables `SEED_*` ne sont utilisées qu’au premier amorçage. Les retirer ensuite, notamment `SEED_ADMIN_PASSWORD`. Pour rejouer seulement les migrations, lancer `pnpm db:migrate` sans aucune variable `SEED_*`.
+Les variables `SEED_*` ne sont utilisées qu’au premier amorçage. Les retirer ensuite, notamment `SEED_ADMIN_PASSWORD`. Pour rejouer seulement les migrations, lancer `pnpm db:migrate` sans aucune variable `SEED_*`. Les fichiers SQL numérotés du dossier `migrations/` sont appliqués dans l’ordre. La migration de clés composites vérifie les relations existantes et s’annule sans supprimer de données si elle détecte une référence entre établissements ; corrigez ces lignes avant de la relancer.
 
 5. Démarrer : `pnpm dev`, puis ouvrir `/connexion`.
 
@@ -43,7 +43,7 @@ pnpm test
 pnpm build
 ```
 
-Les tests unitaires couvrent les calculs, les hachages et la matrice de permissions. Ils ne se connectent pas spontanément à une base : la persistance doit être validée sur un environnement PostgreSQL de test après migration.
+Les tests unitaires couvrent les calculs, les hachages et la matrice de permissions. Les tests PostgreSQL exigent une base locale dédiée dont le nom contient `test`, configurée via `TEST_DATABASE_URL`; ils échouent si la migration `002_tenant_integrity.sql` n’a pas été appliquée. N’utilisez jamais une URL de base de production pour ces tests.
 
 ## Déploiement Vercel
 
