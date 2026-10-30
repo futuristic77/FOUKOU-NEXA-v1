@@ -4,6 +4,7 @@ import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { db } from './db'
 import { hasPermission } from './permissions.mjs'
+import { hasActiveTeacherProfile } from './teacher-scope.mjs'
 import type { Role, SessionUser } from './types'
 
 export const SESSION_COOKIE = 'foukou_session'
@@ -50,6 +51,13 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   `
   const row = rows[0]
   if (!row) return null
+  if (row.role === 'teacher') {
+    const profiles = await db()`
+      SELECT status FROM teachers
+      WHERE user_id = ${row.id} AND school_id = ${row.school_id}
+    `
+    if (!hasActiveTeacherProfile(profiles)) return null
+  }
   await db()`UPDATE sessions SET last_seen_at = now() WHERE token_hash = ${tokenHash(token)} AND last_seen_at < now() - interval '5 minutes'`
   return { id: row.id, schoolId: row.school_id, email: row.email, fullName: row.full_name, role: row.role as Role }
 })

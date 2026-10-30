@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hashPassword, verifyPassword, validatePassword } from '../lib/password.mjs'
-import { hasPermission } from '../lib/permissions.mjs'
-import { hasTeacherAssignment, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
+import { canDeleteSchool, hasPermission, matchesSchoolDeletionConfirmation } from '../lib/permissions.mjs'
+import { hasActiveTeacherProfile, hasTeacherAssignment, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
 
 test('scrypt vérifie le bon mot de passe et refuse un autre', async () => {
   const encoded = await hashPassword('un-mot-de-passe-tres-long')
@@ -34,6 +34,29 @@ test('la direction et l’administration ont des périmètres distincts', () => 
   assert.equal(hasPermission('administration', 'students:write'), true)
   assert.equal(hasPermission('administration', 'settings:write'), false)
   assert.equal(hasPermission('administration', 'users:write'), false)
+})
+
+test('seul le super administrateur peut demander la suppression d’un établissement', () => {
+  assert.equal(hasPermission('super_admin', 'school:delete'), true)
+  assert.equal(canDeleteSchool('super_admin'), true)
+  assert.equal(hasPermission('director', 'school:update'), true)
+  for (const role of ['director', 'administration', 'teacher', 'secretary', 'viewer', 'unknown']) {
+    assert.equal(hasPermission(role, 'school:delete'), false)
+    assert.equal(canDeleteSchool(role), false)
+  }
+})
+
+test('la confirmation de suppression exige exactement le nom de l’établissement', () => {
+  assert.equal(matchesSchoolDeletionConfirmation('SUPPRIMER Collège A', 'Collège A'), true)
+  assert.equal(matchesSchoolDeletionConfirmation('SUPPRIMER', 'Collège A'), false)
+  assert.equal(matchesSchoolDeletionConfirmation('SUPPRIMER Collège B', 'Collège A'), false)
+})
+
+test('un compte enseignant doit avoir au moins un profil actif', () => {
+  assert.equal(hasActiveTeacherProfile([{ status: 'active' }]), true)
+  assert.equal(hasActiveTeacherProfile([{ status: 'inactive' }]), false)
+  assert.equal(hasActiveTeacherProfile([{ status: 'inactive' }, { status: 'active' }]), true)
+  assert.equal(hasActiveTeacherProfile([]), false)
 })
 
 test('les enseignants ne peuvent pas administrer les dossiers', () => {

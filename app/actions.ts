@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { db, logActivity } from '@/lib/db'
 import { requireSchool, requireUser } from '@/lib/auth'
-import { hasPermission } from '@/lib/permissions.mjs'
+import { canDeleteSchool, matchesSchoolDeletionConfirmation } from '@/lib/permissions.mjs'
 import { hasTeacherAssignment } from '@/lib/teacher-scope.mjs'
 import { hashPassword, validatePassword } from '@/lib/password.mjs'
 import { choice, date, email, id, integer, number, optionalText, text, time } from '@/lib/validation'
@@ -52,7 +52,7 @@ async function assertTeacherScope(user: SessionUser, schoolId: string, classId: 
     SELECT ta.class_id AS "classId", ta.subject_id AS "subjectId"
     FROM teacher_assignments ta
     JOIN teachers t ON t.id = ta.teacher_id
-    WHERE t.user_id = ${user.id} AND t.school_id = ${schoolId} AND ta.school_id = ${schoolId}
+    WHERE t.user_id = ${user.id} AND t.school_id = ${schoolId} AND t.status = 'active' AND ta.school_id = ${schoolId}
   `
   if (!hasTeacherAssignment(rows, classId, subjectId)) throw new Error('Cette classe ou matière ne fait pas partie de vos affectations.')
 }
@@ -203,7 +203,7 @@ export async function saveGrade(form: FormData): Promise<ActionResult> {
       await assertTeacherScope(user, schoolId, existing[0].class_id, existing[0].subject_id)
     }
     if (user.role === 'teacher') {
-      const own = await sql`SELECT id FROM teachers WHERE user_id=${user.id} AND school_id=${schoolId}`
+      const own = await sql`SELECT id FROM teachers WHERE user_id=${user.id} AND school_id=${schoolId} AND status='active'`
       if (!own.length) throw new Error('Aucune fiche enseignant n’est liée à ce compte.')
       teacherId = own[0].id
     }
@@ -350,12 +350,26 @@ export async function saveSchool(form: FormData): Promise<ActionResult> {
 }
 
 export async function deleteSchool(form: FormData): Promise<ActionResult> {
-  return perform('school:update', async (_user, schoolId) => {
-    if (String(form.get('confirmation')) !== 'SUPPRIMER') throw new Error('Confirmation de suppression invalide.')
-    const result = await db()`DELETE FROM schools WHERE id=${schoolId}`
-    if (!result.count) throw new Error('Établissement introuvable.')
-    return 'Établissement et données associées supprimés. Déconnectez-vous.'
-  })
+  try {
+    const user = await requireUser('school:delete')
+    if (!canDeleteSchool(user.role)) throw new Error('Suppression réservée à l’administration plateforme.')
+    const schoolId = id(form, 'schoolId')!
+    const confirmation = text(form, 'confirmation', 1, 180)
+    await db().begin(async (sql) => {
+      const rows = await sql`SELECT name FROM schools WHERE id=${schoolId} FOR UPDATE`
+      if (!rows.length) throw new Error('Établissement introuvable.')
+      if (!matchesSchoolDeletionConfirmation(confirmation, rows[0].name)) {
+        throw new Error(`Saisissez « SUPPRIMER ${rows[0].name} » pour confirmer.`)
+      }
+      const result = await sql`DELETE FROM schools WHERE id=${schoolId} RETURNING id`
+      if (!result.length) throw new Error('Établissement introuvable.')
+    })
+    revalidatePath('/')
+    return { ok: true, message: 'Établissement et données associées supprimés.' }
+  } catch (error) {
+    console.error('Suppression d’établissement refusée ou impossible', error)
+    return { ok: false, message: error instanceof Error ? error.message : 'Suppression impossible.' }
+  }
 }
 
 export async function createSchool(form: FormData): Promise<ActionResult> {
