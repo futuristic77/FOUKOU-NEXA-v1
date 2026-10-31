@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { loadSchoolRows } from '../lib/school-data-queries.mjs'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const enabled = Boolean(databaseUrl)
@@ -38,12 +39,17 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !enabled
     const users = await sql`
       INSERT INTO users (school_id, email, full_name, password_hash, role)
       VALUES
-        (${schoolA}, ${`a-${suffix}@example.test`}, 'Test A', 'test-hash', 'director'),
-        (${schoolB}, ${`b-${suffix}@example.test`}, 'Test B', 'test-hash', 'director')
+        (${schoolA}, ${`a-${suffix}@example.test`}, 'Test A', 'test-hash', 'teacher'),
+        (${schoolB}, ${`b-${suffix}@example.test`}, 'Test B', 'test-hash', 'teacher')
       RETURNING id, school_id
     `
     const userA = users[0].id
     const userB = users[1].id
+    const otherUserRows = await sql`
+      INSERT INTO users (school_id, email, full_name, password_hash, role)
+      VALUES (${schoolA}, ${`other-${suffix}@example.test`}, 'Other A staff', 'test-hash', 'director')
+      RETURNING id
+    `
 
     const teachers = await sql`
       INSERT INTO teachers (school_id, user_id, full_name)
@@ -60,6 +66,12 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !enabled
     `
     const classA = classes[0].id
     const classB = classes[1].id
+    const unassignedClassRows = await sql`
+      INSERT INTO classes (school_id, name, level)
+      VALUES (${schoolA}, ${`Unassigned ${suffix}`}, '5e')
+      RETURNING id
+    `
+    const unassignedClass = unassignedClassRows[0].id
 
     const subjects = await sql`
       INSERT INTO subjects (school_id, name)
@@ -73,7 +85,8 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !enabled
       INSERT INTO students (school_id, class_id, student_number, full_name)
       VALUES
         (${schoolA}, ${classA}, ${`A-${suffix}`}, 'Student A'),
-        (${schoolB}, ${classB}, ${`B-${suffix}`}, 'Student B')
+        (${schoolB}, ${classB}, ${`B-${suffix}`}, 'Student B'),
+        (${schoolA}, ${unassignedClass}, ${`A-unassigned-${suffix}`}, 'Unassigned student')
       RETURNING id, school_id
     `
     const studentA = students[0].id
@@ -116,6 +129,29 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !enabled
       RETURNING id
     `
     assert.equal(validAttendance.length, 1)
+
+    await sql`INSERT INTO teacher_assignments (school_id, teacher_id, class_id, subject_id) VALUES (${schoolA}, ${teacherA}, ${classA}, ${subjectA})`
+    await sql`INSERT INTO grades (school_id, student_id, subject_id, teacher_id, term, assessment, score, max_score) VALUES (${schoolA}, ${studentA}, ${subjectA}, ${teacherA}, 'T1', 'Exam A', 15, 20)`
+    await sql`INSERT INTO grades (school_id, student_id, subject_id, teacher_id, term, assessment, score, max_score) VALUES (${schoolA}, ${students[2].id}, ${subjectA}, ${teacherA}, 'T1', 'Exam unassigned', 10, 20)`
+    await sql`INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status) VALUES (${schoolA}, ${students[2].id}, ${unassignedClass}, CURRENT_DATE, 'absent')`
+    await sql`INSERT INTO schedules (school_id, class_id, teacher_id, subject_id, weekday, starts_at, ends_at) VALUES (${schoolA}, ${classA}, ${teacherA}, ${subjectA}, 1, '08:00', '09:00')`
+    await sql`INSERT INTO schedules (school_id, class_id, teacher_id, subject_id, weekday, starts_at, ends_at) VALUES (${schoolA}, ${unassignedClass}, ${teacherA}, ${subjectA}, 1, '09:00', '10:00')`
+    await sql`INSERT INTO communications (school_id, author_id, title, body, audience, status, published_at) VALUES (${schoolA}, ${userA}, 'Teachers', 'Teachers only', 'Équipe pédagogique', 'published', now()), (${schoolA}, ${userA}, 'Community', 'Shared notice', 'Toute la communauté scolaire', 'published', now()), (${schoolA}, ${userA}, 'Direction', 'Internal', 'Direction', 'published', now()), (${schoolA}, ${userA}, 'Draft', 'Private draft', 'Équipe pédagogique', 'draft', null)`
+    await sql`INSERT INTO activity_logs (school_id, actor_id, kind, title) VALUES (${schoolA}, ${userA}, 'test', 'Teacher activity'), (${schoolA}, ${otherUserRows[0].id}, 'test', 'Director activity')`
+
+    const scoped = await loadSchoolRows(sql, { id: userA, role: 'teacher' }, schoolA)
+    assert.deepEqual(scoped.students.map((row) => row.id), [studentA])
+    assert.deepEqual(scoped.classes.map((row) => row.id), [classA])
+    assert.deepEqual(scoped.teachers.map((row) => row.id), [teacherA])
+    assert.deepEqual(scoped.subjects.map((row) => row.id), [subjectA])
+    assert.deepEqual(scoped.assignments.map((row) => row.class_id), [classA])
+    assert.deepEqual(scoped.grades.map((row) => row.assessment), ['Exam A'])
+    assert.equal(scoped.attendance.length, 1)
+    assert.equal(scoped.schedules.length, 1)
+    assert.deepEqual(scoped.communications.map((row) => row.title).sort(), ['Community', 'Teachers'])
+    assert.deepEqual(scoped.activities.map((row) => row.title), ['Teacher activity'])
+    assert.deepEqual(scoped.teacherIds, [teacherA])
+    assert.deepEqual(scoped.users, [])
   } finally {
     try {
       const schoolIds = [schoolA, schoolB].filter(Boolean)
