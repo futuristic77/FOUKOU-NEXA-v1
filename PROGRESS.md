@@ -4,8 +4,8 @@
 
 - Dépôt : `futuristic77/FOUKOU-NEXA-v1`
 - Branche de travail : `feat/school-backend-v1`
-- Dernier commit de code distant confirmé : `d64de1bc1ce39c66f19bc629a1e4e46e4e92246e`
-- Ce commit est le lot sécurité décrit ci-dessous. Relire l’état distant avant toute reprise ; ne jamais déduire le statut de `main` ou d’un ancien état local.
+- Dernier commit de code distant confirmé : `99953f01225f727e7ad3c2bff6ec6969778a5932`
+- Le dernier commit vérifié est le lot de filtrage SQL des enseignants décrit ci-dessous. Cette mise à jour de suivi sera publiée en commit documentaire distinct ; relire l’état distant avant toute reprise.
 - Aucun changement n’a été poussé sur `main`. Aucun déploiement ni accès à une base de production n’a été effectué.
 
 ## Phase actuelle
@@ -20,6 +20,7 @@ Phase 2 — sécurité, isolation des établissements et fiabilité des écritur
 - **VALIDÉ** — `pnpm test` avec `TEST_DATABASE_URL` local : 26 tests réussis, 0 échec, 0 ignoré.
 - **VALIDÉ** — `pnpm typecheck` : réussite.
 - **VALIDÉ** — `pnpm install --frozen-lockfile` : réussite après synchronisation du lockfile avec `package.json`.
+- **VALIDÉ** — Le chargeur SQL enseignant a été testé sur PostgreSQL UTF-8 : il ne renvoie que la classe affectée, ses élèves/notes/présences/emplois du temps, les annonces explicitement ouvertes et les journaux de l’enseignant. Les données d’une classe non affectée sont exclues avant mapping.
 - **IMPLÉMENTÉ NON VALIDÉ** — `saveAttendance` utilise désormais une transaction, verrouille les écritures élève/date et recontrôle l’ancienne et la nouvelle classe. Le helper d’autorisation est testé, mais l’action serveur n’a pas encore de test de bout en bout ni de test de concurrence.
 - **BLOQUÉ** — Le build de production ne termine pas dans l’environnement de travail. Turbopack a signalé une compilation réussie puis n’a pas terminé ; une seconde tentative Webpack est restée sans étape ni erreur jusqu’à son arrêt. Ne pas annoncer le build comme réussi.
 - **INCONNU** — Aucun résultat GitHub Actions n’a été trouvé pour cette branche lors du contrôle ; aucun statut CI n’est établi.
@@ -36,15 +37,22 @@ Commit : `d64de1bc1ce39c66f19bc629a1e4e46e4e92246e` — `fix: enforce tenant-saf
 
 Fichiers touchés : `.gitignore`, `README.md`, `app/actions.ts`, `components/foukou/data.ts` (supprimé), `lib/db.ts`, `lib/teacher-scope.mjs`, `migrations/002_tenant_integrity.sql`, `pnpm-lock.yaml`, `scripts/migrate.mjs`, `tests/database.integration.test.mjs`, `tests/database.test.mjs`, `tests/security.test.mjs`.
 
+Commit : `99953f01225f727e7ad3c2bff6ec6969778a5932` — `fix: scope teacher reads at query time`
+
+- Les requêtes de lecture enseignante filtrent maintenant les lignes autorisées en SQL, avec les vérifications `school_id` dans les jointures.
+- Les profils, affectations et utilisateurs sont verrouillés en lecture pendant le chargement enseignant afin que les droits restent cohérents jusqu’à la fin de la requête.
+- Les tests d’intégration utilisent le chargeur réel contre PostgreSQL UTF-8 et couvrent une classe assignée, une classe non assignée et les audiences/journaux.
+
+Fichiers touchés : `lib/school-data.ts`, `lib/school-data-queries.mjs`, `lib/school-data-queries.d.mts`, `tests/database.integration.test.mjs`.
+
 ## Travaux à poursuivre
 
-1. Filtrer les données des enseignants dans les requêtes SQL de `lib/school-data.ts` au lieu de charger l’ensemble des données d’un établissement puis de filtrer en mémoire.
-2. Définir et tester les audiences de communication, l’accès aux brouillons et le périmètre des familles ; le schéma n’a actuellement ni rôle parent ni association parent-élève.
-3. Construire et tester le portail superadministrateur et l’amorçage du premier compte directeur ; l’interface actuelle ne donne pas encore un parcours complet à ce rôle.
-4. Implémenter le manifeste et le service worker PWA, puis vérifier installation et mode hors ligne.
-5. Ajouter les tests de bout en bout pour les actions sensibles, les refus positifs/négatifs et les écritures concurrentes.
-6. Diagnostiquer puis relancer le build de production. Le dépôt ne déclare pas de script `lint` ; ne pas confondre l’absence de ce script avec une validation lint réussie.
-7. Ne pas déclarer RLS active : l’application utilise un pool PostgreSQL partagé et doit d’abord appliquer un contexte de tenant transactionnel cohérent à toutes les requêtes.
+1. Définir et tester les audiences de communication, l’accès aux brouillons et le périmètre des familles ; le schéma n’a actuellement ni rôle parent ni association parent-élève.
+2. Construire et tester le portail superadministrateur et l’amorçage du premier compte directeur ; l’interface actuelle ne donne pas encore un parcours complet à ce rôle.
+3. Implémenter le manifeste et le service worker PWA, puis vérifier installation et mode hors ligne.
+4. Ajouter les tests de bout en bout pour les actions sensibles, les refus positifs/négatifs et les écritures concurrentes.
+5. Diagnostiquer puis relancer le build de production. Le dépôt ne déclare pas de script `lint` ; ne pas confondre l’absence de ce script avec une validation lint réussie.
+6. Ne pas déclarer RLS active : l’application utilise un pool PostgreSQL partagé et doit d’abord appliquer un contexte de tenant transactionnel cohérent à toutes les requêtes.
 
 ## Commandes de validation
 
