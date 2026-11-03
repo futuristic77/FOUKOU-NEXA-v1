@@ -5,6 +5,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { db } from '@/lib/db'
 import { createSession, destroySession } from '@/lib/auth'
+import { hasActiveTeacherProfile } from '@/lib/teacher-scope.mjs'
 import { hashPassword, verifyPassword } from '@/lib/password.mjs'
 import type { ActionResult } from '@/lib/types'
 
@@ -18,7 +19,7 @@ export async function loginAction(_previous: ActionResult | null, form: FormData
     const identity = createHash('sha256').update(`foukou-login-v1|${ip}|${email}`).digest('hex')
     const attempts = await db()`SELECT COUNT(*) AS count FROM login_attempts WHERE identity_hash=${identity} AND attempted_at > now() - interval '15 minutes'`
     if (Number(attempts[0].count) >= 5) return { ok: false, message: 'Trop de tentatives. Réessayez dans 15 minutes.' }
-    const rows = await db()`SELECT id, password_hash FROM users WHERE email=${email} AND active=true LIMIT 1`
+    const rows = await db()`SELECT id, password_hash, role, school_id FROM users WHERE email=${email} AND active=true LIMIT 1`
     const account = rows[0]
     // Effectue également un scrypt pour un compte inconnu afin de réduire la différence temporelle observable.
     let valid = false
@@ -30,6 +31,12 @@ export async function loginAction(_previous: ActionResult | null, form: FormData
       return { ok: false, message: 'E-mail ou mot de passe incorrect.' }
     }
     await db()`DELETE FROM login_attempts WHERE identity_hash=${identity}`
+    if (account.role === 'teacher') {
+      const profiles = await db()`SELECT status FROM teachers WHERE user_id=${account.id} AND school_id=${account.school_id}`
+      if (!hasActiveTeacherProfile(profiles)) {
+        return { ok: false, message: 'Aucune fiche enseignant unique et active n’est liée à ce compte. Contactez la direction.' }
+      }
+    }
     await createSession(account.id)
   } catch (error) {
     console.error('Connexion impossible', error)

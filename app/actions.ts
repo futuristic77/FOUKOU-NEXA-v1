@@ -5,7 +5,7 @@ import type { TransactionSql } from 'postgres'
 import { db, logActivity } from '@/lib/db'
 import { requireSchool, requireUser } from '@/lib/auth'
 import { canDeleteSchool, matchesSchoolDeletionConfirmation } from '@/lib/permissions.mjs'
-import { hasAttendanceClassAccess, hasTeacherAssignment } from '@/lib/teacher-scope.mjs'
+import { hasAttendanceClassAccess, hasTeacherAssignment, resolveTeacherProfileLink } from '@/lib/teacher-scope.mjs'
 import { hashPassword, validatePassword } from '@/lib/password.mjs'
 import { choice, date, email, id, integer, number, optionalText, text, time } from '@/lib/validation'
 import type { ActionResult, Role, SessionUser } from '@/lib/types'
@@ -139,8 +139,20 @@ export async function saveTeacher(form: FormData): Promise<ActionResult> {
 
 export async function deleteTeacher(form: FormData): Promise<ActionResult> {
   return perform('teachers:write', async (_user, schoolId) => {
-    const result = await db()`DELETE FROM teachers WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Enseignant introuvable.')
+    const teacherId = id(form)!
+    await db().begin(async (tx) => {
+      const teachers = await tx`SELECT user_id AS "userId" FROM teachers WHERE id=${teacherId} AND school_id=${schoolId} FOR UPDATE`
+      if (!teachers.length) throw new Error('Enseignant introuvable.')
+
+      const linkedUserId = teachers[0].userId
+      if (linkedUserId) {
+        const linkedTeachers = await tx`SELECT id FROM users WHERE id=${linkedUserId} AND school_id=${schoolId} AND role='teacher' FOR UPDATE`
+        if (linkedTeachers.length) throw new Error('Cette fiche est liée à un compte enseignant. Supprimez d’abord le compte utilisateur avant de supprimer la fiche.')
+      }
+
+      const result = await tx`DELETE FROM teachers WHERE id=${teacherId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Enseignant introuvable.')
+    })
     return 'Enseignant supprimé.'
   })
 }
@@ -417,6 +429,15 @@ export async function createSchool(form: FormData): Promise<ActionResult> {
   }
 }
 
+function teacherProfileLinkMessage(reason: string) {
+  if (reason === 'missing') return 'Créez d’abord une fiche enseignant active avec la même adresse e-mail.'
+  if (reason === 'inactive') return 'La fiche enseignant liée ou correspondante est inactive. Réactivez-la avant d’activer le compte.'
+  if (reason === 'already-linked') return 'La fiche enseignant correspondante est déjà liée à un autre compte.'
+  if (reason === 'ambiguous') return 'Plusieurs fiches enseignants correspondent à cette adresse. Corrigez les doublons avant d’activer le compte.'
+  if (reason === 'multiple-linked') return 'Ce compte est lié à plusieurs fiches enseignants. Corrigez ces liaisons avant de l’activer.'
+  return 'Impossible de valider la fiche enseignant associée à ce compte.'
+}
+
 export async function saveUser(form: FormData): Promise<ActionResult> {
   return perform('users:write', async (_user, schoolId) => {
     const userId = id(form, 'id', false)
@@ -424,19 +445,43 @@ export async function saveUser(form: FormData): Promise<ActionResult> {
     const userEmail = email(form)
     const role = choice(form, 'role', ['director', 'administration', 'teacher', 'secretary', 'viewer'] as const) as Role
     const password = String(form.get('password') ?? '')
-    const sql = db()
     if (userId) {
       if (password) validatePassword(password)
-      const result = password
-        ? await sql`UPDATE users SET full_name=${fullName}, email=${userEmail}, role=${role}, password_hash=${await hashPassword(password)}, active=${choice(form, 'active', ['true', 'false'] as const) === 'true'}, updated_at=now() WHERE id=${userId} AND school_id=${schoolId}`
-        : await sql`UPDATE users SET full_name=${fullName}, email=${userEmail}, role=${role}, active=${choice(form, 'active', ['true', 'false'] as const) === 'true'}, updated_at=now() WHERE id=${userId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Compte introuvable.')
-      if (role === 'teacher') await sql`UPDATE teachers SET user_id=${userId} WHERE email=${userEmail} AND school_id=${schoolId}`
-    } else {
-      validatePassword(password)
-      const rows = await sql`INSERT INTO users (school_id, email, full_name, password_hash, role) VALUES (${schoolId}, ${userEmail}, ${fullName}, ${await hashPassword(password)}, ${role}) RETURNING id`
-      if (role === 'teacher') await sql`UPDATE teachers SET user_id=${rows[0].id} WHERE email=${userEmail} AND school_id=${schoolId}`
-    }
+    } else validatePassword(password)
+
+    const active = userId ? choice(form, 'active', ['true', 'false'] as const) === 'true' : true
+    const passwordHash = password ? await hashPassword(password) : null
+    const sql = db()
+
+    await sql.begin(async (tx) => {
+      let teacherProfileId: string | null = null
+      if (role === 'teacher' && active) {
+        const linkedProfiles = userId
+          ? await tx`SELECT id, user_id AS "userId", status FROM teachers WHERE school_id=${schoolId} AND user_id=${userId} FOR UPDATE`
+          : []
+        const profilesByEmail = await tx`SELECT id, user_id AS "userId", status FROM teachers WHERE school_id=${schoolId} AND lower(email)=${userEmail} FOR UPDATE`
+        const profileLink = resolveTeacherProfileLink([...linkedProfiles, ...profilesByEmail], userId)
+        if ('reason' in profileLink) throw new Error(teacherProfileLinkMessage(profileLink.reason ?? 'unknown'))
+        if (profileLink.needsLink) teacherProfileId = profileLink.profileId
+      }
+
+      let targetUserId = userId
+      if (userId) {
+        const result = passwordHash
+          ? await tx`UPDATE users SET full_name=${fullName}, email=${userEmail}, role=${role}, password_hash=${passwordHash}, active=${active}, updated_at=now() WHERE id=${userId} AND school_id=${schoolId}`
+          : await tx`UPDATE users SET full_name=${fullName}, email=${userEmail}, role=${role}, active=${active}, updated_at=now() WHERE id=${userId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Compte introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO users (school_id, email, full_name, password_hash, role) VALUES (${schoolId}, ${userEmail}, ${fullName}, ${passwordHash}, ${role}) RETURNING id`
+        targetUserId = rows[0].id
+      }
+
+      if (teacherProfileId && targetUserId) {
+        const linked = await tx`UPDATE teachers SET user_id=${targetUserId}, updated_at=now() WHERE id=${teacherProfileId} AND school_id=${schoolId} AND status='active' AND user_id IS NULL RETURNING id`
+        if (!linked.length) throw new Error('La fiche enseignant vient d’être associée à un autre compte. Réessayez.')
+      }
+    })
+
     return userId ? 'Compte et permissions mis à jour.' : 'Compte utilisateur créé.'
   })
 }

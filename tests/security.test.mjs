@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hashPassword, verifyPassword, validatePassword } from '../lib/password.mjs'
 import { canDeleteSchool, hasPermission, matchesSchoolDeletionConfirmation } from '../lib/permissions.mjs'
-import { hasActiveTeacherProfile, hasAttendanceClassAccess, hasTeacherAssignment, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
+import { hasActiveTeacherProfile, hasAttendanceClassAccess, hasTeacherAssignment, resolveTeacherProfileLink, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
 
 test('scrypt vérifie le bon mot de passe et refuse un autre', async () => {
   const encoded = await hashPassword('un-mot-de-passe-tres-long')
@@ -34,10 +34,16 @@ test('la direction et l’administration ont des périmètres distincts', () => 
   assert.equal(hasPermission('administration', 'students:write'), true)
   assert.equal(hasPermission('administration', 'settings:write'), false)
   assert.equal(hasPermission('administration', 'users:write'), false)
+  for (const role of ['teacher', 'secretary', 'viewer', 'super_admin', 'unknown']) {
+    assert.equal(hasPermission(role, 'users:write'), false)
+  }
 })
 
 test('seul le super administrateur peut demander la suppression d’un établissement', () => {
+  assert.equal(hasPermission('super_admin', 'school:create'), true)
   assert.equal(hasPermission('super_admin', 'school:delete'), true)
+  assert.equal(hasPermission('super_admin', 'users:write'), false)
+  assert.equal(hasPermission('super_admin', 'school:read'), false)
   assert.equal(canDeleteSchool('super_admin'), true)
   assert.equal(hasPermission('director', 'school:update'), true)
   for (const role of ['director', 'administration', 'teacher', 'secretary', 'viewer', 'unknown']) {
@@ -52,11 +58,36 @@ test('la confirmation de suppression exige exactement le nom de l’établisseme
   assert.equal(matchesSchoolDeletionConfirmation('SUPPRIMER Collège B', 'Collège A'), false)
 })
 
-test('un compte enseignant doit avoir au moins un profil actif', () => {
+test('un compte enseignant doit avoir un profil unique et actif', () => {
   assert.equal(hasActiveTeacherProfile([{ status: 'active' }]), true)
   assert.equal(hasActiveTeacherProfile([{ status: 'inactive' }]), false)
-  assert.equal(hasActiveTeacherProfile([{ status: 'inactive' }, { status: 'active' }]), true)
+  assert.equal(hasActiveTeacherProfile([{ status: 'inactive' }, { status: 'active' }]), false)
+  assert.equal(hasActiveTeacherProfile([{ status: 'active' }, { status: 'active' }]), false)
   assert.equal(hasActiveTeacherProfile([]), false)
+})
+
+test('la liaison d’un compte enseignant exige un profil actif, unique et libre', () => {
+  assert.deepEqual(resolveTeacherProfileLink([], null), { ok: false, reason: 'missing' })
+  assert.deepEqual(resolveTeacherProfileLink([{ id: 'profile-a', userId: null, status: 'inactive' }], null), { ok: false, reason: 'inactive' })
+  assert.deepEqual(resolveTeacherProfileLink([{ id: 'profile-a', userId: 'other-user', status: 'active' }], null), { ok: false, reason: 'already-linked' })
+  assert.deepEqual(resolveTeacherProfileLink([
+    { id: 'profile-a', userId: null, status: 'active' },
+    { id: 'profile-b', userId: null, status: 'active' },
+  ], null), { ok: false, reason: 'ambiguous' })
+  assert.deepEqual(resolveTeacherProfileLink([{ id: 'profile-a', userId: null, status: 'active' }], null), {
+    ok: true,
+    profileId: 'profile-a',
+    needsLink: true,
+  })
+  assert.deepEqual(resolveTeacherProfileLink([{ id: 'profile-a', userId: 'user-a', status: 'active' }], 'user-a'), {
+    ok: true,
+    profileId: 'profile-a',
+    needsLink: false,
+  })
+  assert.deepEqual(resolveTeacherProfileLink([
+    { id: 'profile-a', userId: 'user-a', status: 'active' },
+    { id: 'profile-b', userId: 'user-a', status: 'active' },
+  ], 'user-a'), { ok: false, reason: 'multiple-linked' })
 })
 
 test('les enseignants ne peuvent pas administrer les dossiers', () => {

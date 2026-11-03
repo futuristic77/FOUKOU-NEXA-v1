@@ -9,6 +9,7 @@ test('le schéma couvre les modules métier et les clés d’isolation', async (
   }
   assert.match(schema, /UNIQUE \(student_id, attendance_date\)/)
   assert.match(schema, /CHECK \(score <= max_score\)/)
+  assert.match(schema, /CHECK \(\(role = 'super_admin'\) = \(school_id IS NULL\)\)/)
   assert.match(schema, /ON DELETE CASCADE/)
 })
 
