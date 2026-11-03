@@ -13,6 +13,13 @@ test('le schéma couvre les modules métier et les clés d’isolation', async (
   assert.match(schema, /ON DELETE CASCADE/)
 })
 
+test('la migration ajoute les coordonnées administratives avec des bornes persistées', async () => {
+  const migration = await readFile(new URL('../migrations/003_school_contact_details.sql', import.meta.url), 'utf8')
+  assert.match(migration, /ADD COLUMN address text NOT NULL DEFAULT '' CHECK \(char_length\(address\) <= 240\)/)
+  assert.match(migration, /ADD COLUMN phone text NOT NULL DEFAULT '' CHECK \(char_length\(phone\) <= 40\)/)
+  assert.match(migration, /ADD COLUMN email text NOT NULL DEFAULT '' CHECK \(char_length\(email\) <= 254\)/)
+})
+
 test('la migration tenant ajoute et valide des clés étrangères composites', async () => {
   const migration = await readFile(new URL('../migrations/002_tenant_integrity.sql', import.meta.url), 'utf8')
   for (const constraint of [

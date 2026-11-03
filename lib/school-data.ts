@@ -32,7 +32,7 @@ export async function getSchoolData(): Promise<SchoolData> {
 
   const data: SchoolData = {
     user,
-    school: { id: schools[0].id, name: schools[0].name, city: schools[0].city, country: schools[0].country },
+    school: { id: schools[0].id, name: schools[0].name, city: schools[0].city, country: schools[0].country, address: schools[0].address, phone: schools[0].phone, email: schools[0].email },
     settings: { academicYear: settings[0].academic_year, currentTerm, periodType: settings[0].period_type, yearStart: settings[0].year_start ?? '', yearEnd: settings[0].year_end ?? '', passingAverage: Number(settings[0].passing_average) },
     students: mappedStudents,
     classes: classes.map((row) => ({ id: row.id, name: row.name, level: row.level, room: row.room, leadTeacherId: row.lead_teacher_id, leadTeacher: row.lead_teacher, enrolled: Number(row.enrolled) })),

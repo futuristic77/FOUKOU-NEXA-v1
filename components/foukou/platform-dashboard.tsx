@@ -24,6 +24,9 @@ export function PlatformDashboard({ user, schools }: { user: SessionUser; school
               <label className="form-field platform-field-wide"><span>Nom de l’établissement</span><input name="name" required minLength={2} maxLength={160} /></label>
               <label className="form-field"><span>Ville</span><input name="city" required maxLength={120} /></label>
               <label className="form-field"><span>Pays</span><input name="country" required maxLength={120} defaultValue="Côte d’Ivoire" /></label>
+              <label className="form-field platform-field-wide"><span>Adresse</span><input name="address" maxLength={240} /></label>
+              <label className="form-field"><span>Téléphone</span><input name="phone" type="tel" maxLength={40} /></label>
+              <label className="form-field"><span>E-mail</span><input name="email" type="email" maxLength={254} /></label>
               <label className="form-field platform-field-wide"><span>Année scolaire</span><input name="academicYear" required minLength={4} maxLength={20} defaultValue={`${academicYear}-${academicYear + 1}`} /></label>
             </div>
             <Button type="submit"><Plus data-icon="inline-start" aria-hidden="true" />Créer l’établissement</Button>

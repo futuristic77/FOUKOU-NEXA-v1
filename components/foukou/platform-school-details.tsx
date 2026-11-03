@@ -18,6 +18,9 @@ export function PlatformSchoolDetails({ user, school }: { user: SessionUser; sch
           <div><dt>Identifiant établissement</dt><dd className="platform-id">{school.id}</dd></div>
           <div><dt>Ville</dt><dd>{school.city}</dd></div>
           <div><dt>Pays</dt><dd>{school.country}</dd></div>
+          <div><dt>Adresse</dt><dd>{school.address || 'Non renseignée'}</dd></div>
+          <div><dt>Téléphone</dt><dd>{school.phone || 'Non renseigné'}</dd></div>
+          <div><dt>E-mail</dt><dd>{school.email || 'Non renseigné'}</dd></div>
           <div><dt>Date d’enregistrement</dt><dd><time dateTime={school.createdAt}>{dateFormatter.format(new Date(school.createdAt))}</time></dd></div>
         </dl>
         <p className="platform-scope-note">Aucune donnée d’élèves, de personnel, de notes ou de présence n’est consultée dans cette fiche.</p>

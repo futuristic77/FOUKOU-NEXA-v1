@@ -3,11 +3,13 @@
 import { revalidatePath } from 'next/cache'
 import type { TransactionSql } from 'postgres'
 import { db, logActivity } from '@/lib/db'
+import { actionErrorMessage } from '@/lib/action-errors.mjs'
+import { updateSchoolProfile, updateSchoolSettings } from '@/lib/school-admin-data.mjs'
 import { requirePlatformAdmin, requireSchool, requireUser } from '@/lib/auth'
 import { canDeleteSchool, matchesSchoolDeletionConfirmation } from '@/lib/permissions.mjs'
 import { hasAttendanceClassAccess, hasTeacherAssignment, resolveTeacherProfileLink } from '@/lib/teacher-scope.mjs'
 import { hashPassword, validatePassword } from '@/lib/password.mjs'
-import { choice, date, email, id, integer, number, optionalText, text, time } from '@/lib/validation'
+import { choice, date, email, id, integer, number, optionalEmail, optionalText, text, time } from '@/lib/validation'
 import type { ActionResult, Role, SessionUser } from '@/lib/types'
 
 async function perform(permission: string, work: (user: SessionUser, schoolId: string) => Promise<string>): Promise<ActionResult> {
@@ -19,8 +21,7 @@ async function perform(permission: string, work: (user: SessionUser, schoolId: s
     return { ok: true, message }
   } catch (error) {
     console.error('Action scolaire refusée ou impossible', error)
-    const isDatabaseError = typeof error === 'object' && error !== null && 'code' in error
-    return { ok: false, message: isDatabaseError ? 'Opération impossible : vérifiez les doublons et les éléments encore liés.' : error instanceof Error ? error.message : 'Opération impossible.' }
+    return { ok: false, message: actionErrorMessage(error, 'Opération scolaire impossible.') }
   }
 }
 
@@ -373,19 +374,33 @@ export async function saveSettings(form: FormData): Promise<ActionResult> {
     const currentTerm = text(form, 'currentTerm', 1, 50)
     const yearStart = date(form, 'yearStart', false)
     const yearEnd = date(form, 'yearEnd', false)
+    const periodType = choice(form, 'periodType', ['trimester', 'semester'] as const)
+    const passingAverage = number(form, 'passingAverage', 0, 20)
     if (yearStart && yearEnd && yearEnd < yearStart) throw new Error('La fin de l’année doit suivre la rentrée.')
-    await db()`UPDATE school_settings SET academic_year=${academicYear}, current_term=${currentTerm}, period_type=${choice(form, 'periodType', ['trimester', 'semester'] as const)}, year_start=${yearStart}, year_end=${yearEnd}, passing_average=${number(form, 'passingAverage', 0, 20)}, updated_at=now() WHERE school_id=${schoolId}`
-    await logActivity(db(), schoolId, user.id, 'settings', 'Paramètres scolaires modifiés', academicYear)
+
+    await db().begin(async (tx) => {
+      await updateSchoolSettings(tx, schoolId, { academicYear, currentTerm, periodType, yearStart, yearEnd, passingAverage })
+      await logActivity(tx, schoolId, user.id, 'settings', 'Paramètres scolaires modifiés', academicYear)
+    })
     return 'Paramètres scolaires enregistrés.'
   })
 }
 
 export async function saveSchool(form: FormData): Promise<ActionResult> {
   return perform('school:update', async (user, schoolId) => {
-    const name = text(form, 'name', 2, 160)
-    const result = await db()`UPDATE schools SET name=${name}, city=${text(form, 'city', 1, 120)}, country=${text(form, 'country', 1, 120)}, updated_at=now() WHERE id=${schoolId}`
-    if (!result.count) throw new Error('Établissement introuvable.')
-    await logActivity(db(), schoolId, user.id, 'settings', 'Profil de l’établissement modifié', name)
+    const profile = {
+      name: text(form, 'name', 2, 160),
+      city: text(form, 'city', 1, 120),
+      country: text(form, 'country', 1, 120),
+      address: optionalText(form, 'address', 240),
+      phone: optionalText(form, 'phone', 40),
+      email: optionalEmail(form, 'email'),
+    }
+
+    await db().begin(async (tx) => {
+      await updateSchoolProfile(tx, schoolId, profile)
+      await logActivity(tx, schoolId, user.id, 'settings', 'Profil de l’établissement modifié', profile.name)
+    })
     return 'Profil de l’établissement enregistré.'
   })
 }
@@ -410,7 +425,7 @@ export async function deleteSchool(form: FormData): Promise<ActionResult> {
     return { ok: true, message: 'Établissement et données associées supprimés.' }
   } catch (error) {
     console.error('Suppression d’établissement refusée ou impossible', error)
-    return { ok: false, message: error instanceof Error ? error.message : 'Suppression impossible.' }
+    return { ok: false, message: actionErrorMessage(error, 'Suppression impossible.') }
   }
 }
 
@@ -418,15 +433,21 @@ export async function createSchool(form: FormData): Promise<ActionResult> {
   try {
     await requirePlatformAdmin('school:create')
     const name = text(form, 'name', 2, 160)
+    const city = text(form, 'city', 1, 120)
+    const country = text(form, 'country', 1, 120)
+    const address = optionalText(form, 'address', 240)
+    const phone = optionalText(form, 'phone', 40)
+    const schoolEmail = optionalEmail(form, 'email')
+    const academicYear = text(form, 'academicYear', 4, 20)
     await db().begin(async (sql) => {
-      const rows = await sql`INSERT INTO schools (name, city, country) VALUES (${name}, ${text(form, 'city', 1, 120)}, ${text(form, 'country', 1, 120)}) RETURNING id`
-      await sql`INSERT INTO school_settings (school_id, academic_year, current_term) VALUES (${rows[0].id}, ${text(form, 'academicYear', 4, 20)}, 'Trimestre 1')`
+      const rows = await sql`INSERT INTO schools (name, city, country, address, phone, email) VALUES (${name}, ${city}, ${country}, ${address}, ${phone}, ${schoolEmail}) RETURNING id`
+      await sql`INSERT INTO school_settings (school_id, academic_year, current_term) VALUES (${rows[0].id}, ${academicYear}, 'Trimestre 1')`
     })
     revalidatePath('/')
     revalidatePath('/plateforme')
     return { ok: true, message: 'Établissement créé.' }
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : 'Création impossible.' }
+    return { ok: false, message: actionErrorMessage(error, 'Création impossible.') }
   }
 }
 

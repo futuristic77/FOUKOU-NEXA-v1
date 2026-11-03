@@ -1,3 +1,5 @@
+import { isIsoCalendarDate, isValidEmail, isUuid } from './validation-helpers.mjs'
+
 export function text(form: FormData, key: string, min = 0, max = 500): string {
   const value = String(form.get(key) ?? '').trim()
   if (value.length < min || value.length > max) throw new Error(`Le champ ${key} doit contenir entre ${min} et ${max} caractères.`)
@@ -11,7 +13,7 @@ export function optionalText(form: FormData, key: string, max = 500): string {
 export function id(form: FormData, key = 'id', required = true): string | null {
   const value = String(form.get(key) ?? '')
   if (!value && !required) return null
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error('Identifiant invalide.')
+  if (!isUuid(value)) throw new Error('Identifiant invalide.')
   return value
 }
 
@@ -32,7 +34,7 @@ export function integer(form: FormData, key: string, min: number, max: number): 
 export function date(form: FormData, key: string, required = true): string | null {
   const value = String(form.get(key) ?? '')
   if (!value && !required) return null
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) throw new Error(`Date invalide pour ${key}.`)
+  if (!isIsoCalendarDate(value)) throw new Error(`Date invalide pour ${key}.`)
   return value
 }
 
@@ -50,6 +52,12 @@ export function choice<T extends string>(form: FormData, key: string, values: re
 
 export function email(form: FormData, key = 'email'): string {
   const value = text(form, key, 3, 254).toLowerCase()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw new Error('Adresse e-mail invalide.')
+  if (!isValidEmail(value)) throw new Error('Adresse e-mail invalide.')
+  return value
+}
+
+export function optionalEmail(form: FormData, key = 'email'): string {
+  const value = optionalText(form, key, 254).toLowerCase()
+  if (value && !isValidEmail(value)) throw new Error('Adresse e-mail invalide.')
   return value
 }

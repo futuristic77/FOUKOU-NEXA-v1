@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useTransition, type FormEvent, type ReactNode } from 'react'
+import { useRef, useState, useTransition, type FormEvent, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+import { finishSubmission, tryStartSubmission } from '@/lib/submission-guard.mjs'
 import type { ActionResult } from '@/lib/types'
 
 type Action = (form: FormData) => Promise<ActionResult>
@@ -9,20 +10,39 @@ type Action = (form: FormData) => Promise<ActionResult>
 export function ActionForm({ action, children, className, onSuccess, resetOnSuccess = false, confirm }: { action: Action; children: ReactNode; className?: string; onSuccess?: () => void; resetOnSuccess?: boolean; confirm?: string }) {
   const [pending, startTransition] = useTransition()
   const [result, setResult] = useState<ActionResult | null>(null)
+  const submissionLock = useRef(false)
   const router = useRouter()
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (confirm && !window.confirm(confirm)) return
+    if (!tryStartSubmission(submissionLock)) return
+    if (confirm && !window.confirm(confirm)) {
+      finishSubmission(submissionLock)
+      return
+    }
     const form = event.currentTarget
-    const formData = new FormData(form)
+    let formData: FormData
+    try {
+      formData = new FormData(form)
+    } catch {
+      finishSubmission(submissionLock)
+      setResult({ ok: false, message: 'Impossible de préparer le formulaire. Réessayez.' })
+      return
+    }
+    setResult(null)
     startTransition(async () => {
-      const response = await action(formData)
-      setResult(response)
-      if (response.ok) {
-        if (resetOnSuccess) form.reset()
-        onSuccess?.()
-        router.refresh()
+      try {
+        const response = await action(formData)
+        setResult(response)
+        if (response.ok) {
+          if (resetOnSuccess) form.reset()
+          onSuccess?.()
+          router.refresh()
+        }
+      } catch {
+        setResult({ ok: false, message: 'Enregistrement impossible. Vérifiez votre connexion puis réessayez.' })
+      } finally {
+        finishSubmission(submissionLock)
       }
     })
   }

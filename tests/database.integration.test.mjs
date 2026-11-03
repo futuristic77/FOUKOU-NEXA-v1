@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { loadSchoolRows } from '../lib/school-data-queries.mjs'
+import { updateSchoolProfile, updateSchoolSettings } from '../lib/school-admin-data.mjs'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const enabled = Boolean(databaseUrl)
@@ -158,6 +159,97 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !enabled
       if (schoolIds.length) {
         await sql`DELETE FROM schools WHERE id = ANY(${sql.array(schoolIds, 2950)})`
       }
+    } finally {
+      await sql.end()
+    }
+  }
+})
+
+test('les requêtes administratives restent limitées au school_id fourni', { skip: !enabled }, async () => {
+  assertIsolatedTestDatabase(databaseUrl)
+  const { default: postgres } = await import('postgres')
+  const sql = postgres(databaseUrl, {
+    ssl: process.env.DATABASE_SSL === 'disable' ? false : 'require',
+    max: 1,
+    connect_timeout: 5,
+  })
+  const suffix = randomUUID()
+  let schoolA
+  let schoolB
+  const nextSettings = {
+    academicYear: '2026-2027',
+    currentTerm: 'T2',
+    periodType: 'semester',
+    yearStart: '2026-08-01',
+    yearEnd: '2027-06-30',
+    passingAverage: 12.5,
+    schoolId: null,
+  }
+
+  try {
+    const contactMigration = await sql`SELECT name FROM schema_migrations WHERE name = '003_school_contact_details.sql'`
+    assert.equal(contactMigration.length, 1, 'school contact migration must be applied before admin integration tests')
+
+    const schools = await sql`
+      INSERT INTO schools (name, city, country)
+      VALUES (${`Admin A ${suffix}`}, 'Ville A', 'Pays A'), (${`Admin B ${suffix}`}, 'Ville B', 'Pays B')
+      RETURNING id
+    `
+    schoolA = schools[0].id
+    schoolB = schools[1].id
+    nextSettings.schoolId = schoolB
+    await sql`
+      INSERT INTO school_settings (school_id, academic_year, current_term)
+      VALUES (${schoolA}, '2025-2026', 'T1'), (${schoolB}, '2025-2026', 'T1')
+    `
+
+    await sql.begin(async (tx) => {
+      await updateSchoolProfile(tx, schoolA, {
+        name: `Updated A ${suffix}`,
+        city: 'Ville A modifiée',
+        country: 'Pays A',
+        address: 'Adresse A',
+        phone: '+225 01020304',
+        email: 'a@example.test',
+        schoolId: schoolB,
+      })
+      await updateSchoolSettings(tx, schoolA, nextSettings)
+    })
+
+    const schoolsAfterUpdate = await sql`
+      SELECT id, name, city, address, phone, email FROM schools
+      WHERE id = ANY(${sql.array([schoolA, schoolB], 2950)})
+    `
+    const schoolAAfterUpdate = schoolsAfterUpdate.find((school) => school.id === schoolA)
+    const schoolBAfterUpdate = schoolsAfterUpdate.find((school) => school.id === schoolB)
+    assert.equal(schoolAAfterUpdate.name, `Updated A ${suffix}`)
+    assert.equal(schoolAAfterUpdate.address, 'Adresse A')
+    assert.equal(schoolAAfterUpdate.email, 'a@example.test')
+    assert.equal(schoolBAfterUpdate.name, `Admin B ${suffix}`)
+    assert.equal(schoolBAfterUpdate.city, 'Ville B')
+    assert.equal(schoolBAfterUpdate.address, '')
+
+    const settingsAfterUpdate = await sql`
+      SELECT school_id, academic_year, current_term, period_type, passing_average FROM school_settings
+      WHERE school_id = ANY(${sql.array([schoolA, schoolB], 2950)})
+    `
+    const settingsA = settingsAfterUpdate.find((settings) => settings.school_id === schoolA)
+    const settingsB = settingsAfterUpdate.find((settings) => settings.school_id === schoolB)
+    assert.equal(settingsA.academic_year, '2026-2027')
+    assert.equal(settingsA.current_term, 'T2')
+    assert.equal(settingsA.period_type, 'semester')
+    assert.equal(Number(settingsA.passing_average), 12.5)
+    assert.equal(settingsB.academic_year, '2025-2026')
+    assert.equal(settingsB.current_term, 'T1')
+
+    await assert.rejects(updateSchoolProfile(sql, randomUUID(), {
+      name: 'Missing school', city: 'Ville', country: 'Pays', address: '', phone: '', email: '',
+    }), /Établissement introuvable/)
+    await assert.rejects(updateSchoolSettings(sql, randomUUID(), nextSettings), /Paramètres scolaires introuvables/)
+  } finally {
+    try {
+      const schoolIds = [schoolA, schoolB].filter(Boolean)
+      if (schoolIds.length) await sql`DELETE FROM schools WHERE id = ANY(${sql.array(schoolIds, 2950)})`
     } finally {
       await sql.end()
     }

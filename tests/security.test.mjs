@@ -1,7 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hashPassword, verifyPassword, validatePassword } from '../lib/password.mjs'
-import { canDeleteSchool, hasPermission, isPlatformAdmin, matchesSchoolDeletionConfirmation } from '../lib/permissions.mjs'
+import { assertPermission, canDeleteSchool, hasPermission, isPlatformAdmin, matchesSchoolDeletionConfirmation } from '../lib/permissions.mjs'
+import { actionErrorMessage } from '../lib/action-errors.mjs'
+import { finishSubmission, tryStartSubmission } from '../lib/submission-guard.mjs'
+import { requireSchoolId } from '../lib/tenant-scope.mjs'
+import { isIsoCalendarDate, isUuid, isValidEmail } from '../lib/validation-helpers.mjs'
 import { getHomeDestination } from '../lib/platform-routing.mjs'
 import { hasActiveTeacherProfile, hasAttendanceClassAccess, hasTeacherAssignment, resolveTeacherProfileLink, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
 
@@ -47,6 +51,9 @@ test('seul le super administrateur peut demander la suppression d’un établiss
   assert.equal(hasPermission('super_admin', 'users:write'), false)
   assert.equal(hasPermission('super_admin', 'school:read'), false)
   assert.equal(canDeleteSchool('super_admin'), true)
+  const platformAdmin = { id: 'platform-admin', schoolId: null, role: 'super_admin' }
+  assert.equal(assertPermission(platformAdmin, 'school:create'), platformAdmin)
+  assert.equal(assertPermission(platformAdmin, 'school:delete'), platformAdmin)
   assert.equal(hasPermission('director', 'school:update'), true)
   for (const role of ['director', 'administration', 'teacher', 'secretary', 'viewer', 'unknown']) {
     assert.equal(hasPermission(role, 'school:delete'), false)
@@ -83,6 +90,51 @@ test('la confirmation de suppression exige exactement le nom de l’établisseme
   assert.equal(matchesSchoolDeletionConfirmation('SUPPRIMER Collège A', 'Collège A'), true)
   assert.equal(matchesSchoolDeletionConfirmation('SUPPRIMER', 'Collège A'), false)
   assert.equal(matchesSchoolDeletionConfirmation('SUPPRIMER Collège B', 'Collège A'), false)
+})
+
+test('les paramètres sont réservés à la direction et la portée vient de la session', () => {
+  const director = { id: 'director-a', schoolId: 'school-a', role: 'director' }
+  assert.equal(assertPermission(director, 'school:update'), director)
+  assert.equal(assertPermission(director, 'settings:write'), director)
+  assert.equal(requireSchoolId(director), 'school-a')
+
+  for (const role of ['administration', 'teacher', 'secretary', 'viewer']) {
+    const user = { id: `${role}-a`, schoolId: 'school-a', role }
+    assert.throws(() => assertPermission(user, 'school:update'), /permission/i)
+    assert.throws(() => assertPermission(user, 'settings:write'), /permission/i)
+  }
+  assert.throws(() => assertPermission({ id: 'admin', schoolId: null, role: 'super_admin' }, 'settings:write'), /permission/i)
+  assert.throws(() => assertPermission(null, 'school:update'), /Authentification/i)
+  assert.throws(() => requireSchoolId({ id: 'admin', schoolId: null, role: 'super_admin' }), /Aucun établissement/i)
+})
+
+test('les identifiants et dates invalides sont rejetés avant la requête SQL', () => {
+  assert.equal(isUuid('63e5a0af-02d0-4fe4-bbb1-2ca9a7df7f77'), true)
+  assert.equal(isUuid('63e5a0af-02d0-4fe4-bbb1-2ca9a7df7f77 OR 1=1'), false)
+  assert.equal(isUuid('not-a-uuid'), false)
+  assert.equal(isIsoCalendarDate('2024-02-29'), true)
+  assert.equal(isIsoCalendarDate('2025-02-29'), false)
+  assert.equal(isIsoCalendarDate('2025-02-30'), false)
+  assert.equal(isIsoCalendarDate('0000-01-01'), false)
+  assert.equal(isValidEmail('contact@example.test'), true)
+  assert.equal(isValidEmail('invalid-email'), false)
+})
+
+test('les erreurs réseau et SQL ne divulguent pas de détails internes', () => {
+  const databaseError = Object.assign(new Error('postgres://user:secret@db.internal/app'), { code: '08006' })
+  assert.equal(actionErrorMessage(databaseError), 'Opération impossible pour le moment. Vérifiez les informations puis réessayez.')
+  assert.equal(actionErrorMessage(new Error('DATABASE_URL n’est pas configurée.')), 'Opération impossible pour le moment. Vérifiez les informations puis réessayez.')
+  assert.equal(actionErrorMessage(new Error('Adresse e-mail invalide.')), 'Adresse e-mail invalide.')
+})
+
+test('les formulaires ne peuvent démarrer qu’une soumission à la fois', () => {
+  const lock = { current: false }
+  assert.equal(tryStartSubmission(lock), true)
+  assert.equal(tryStartSubmission(lock), false)
+  finishSubmission(lock)
+  assert.equal(tryStartSubmission(lock), true)
+  finishSubmission(lock)
+  assert.equal(lock.current, false)
 })
 
 test('un compte enseignant doit avoir un profil unique et actif', () => {
