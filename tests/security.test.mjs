@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hashPassword, verifyPassword, validatePassword } from '../lib/password.mjs'
-import { canDeleteSchool, hasPermission, matchesSchoolDeletionConfirmation } from '../lib/permissions.mjs'
+import { canDeleteSchool, hasPermission, isPlatformAdmin, matchesSchoolDeletionConfirmation } from '../lib/permissions.mjs'
+import { getHomeDestination } from '../lib/platform-routing.mjs'
 import { hasActiveTeacherProfile, hasAttendanceClassAccess, hasTeacherAssignment, resolveTeacherProfileLink, scopeSchoolDataForUser } from '../lib/teacher-scope.mjs'
 
 test('scrypt vérifie le bon mot de passe et refuse un autre', async () => {
@@ -42,6 +43,7 @@ test('la direction et l’administration ont des périmètres distincts', () => 
 test('seul le super administrateur peut demander la suppression d’un établissement', () => {
   assert.equal(hasPermission('super_admin', 'school:create'), true)
   assert.equal(hasPermission('super_admin', 'school:delete'), true)
+  assert.equal(hasPermission('super_admin', 'platform:read'), true)
   assert.equal(hasPermission('super_admin', 'users:write'), false)
   assert.equal(hasPermission('super_admin', 'school:read'), false)
   assert.equal(canDeleteSchool('super_admin'), true)
@@ -49,6 +51,31 @@ test('seul le super administrateur peut demander la suppression d’un établiss
   for (const role of ['director', 'administration', 'teacher', 'secretary', 'viewer', 'unknown']) {
     assert.equal(hasPermission(role, 'school:delete'), false)
     assert.equal(canDeleteSchool(role), false)
+  }
+})
+
+test('un super administrateur sans établissement accède à la plateforme sans accès scolaire', () => {
+  const user = { role: 'super_admin', schoolId: null }
+  assert.equal(isPlatformAdmin(user), true)
+  assert.equal(getHomeDestination(user), '/plateforme')
+  assert.equal(hasPermission('super_admin', 'platform:read'), true)
+  assert.equal(hasPermission('super_admin', 'school:read'), false)
+  assert.equal(hasPermission('super_admin', 'students:write'), false)
+  assert.equal(hasPermission('super_admin', '*'), false)
+  assert.equal(isPlatformAdmin({ ...user, schoolId: 'school-id' }), false)
+  assert.equal(getHomeDestination(null), '/connexion')
+})
+
+test('un directeur avec établissement reste dans l’espace scolaire', () => {
+  const user = { role: 'director', schoolId: 'school-id' }
+  assert.equal(getHomeDestination(user), '/')
+  assert.equal(isPlatformAdmin(user), false)
+  assert.equal(hasPermission('director', 'platform:read'), false)
+  assert.equal(hasPermission('director', 'school:read'), true)
+
+  for (const role of ['administration', 'teacher', 'secretary', 'viewer']) {
+    assert.equal(isPlatformAdmin({ role, schoolId: 'school-id' }), false)
+    assert.equal(hasPermission(role, 'platform:read'), false)
   }
 })
 

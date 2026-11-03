@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import type { TransactionSql } from 'postgres'
 import { db, logActivity } from '@/lib/db'
-import { requireSchool, requireUser } from '@/lib/auth'
+import { requirePlatformAdmin, requireSchool, requireUser } from '@/lib/auth'
 import { canDeleteSchool, matchesSchoolDeletionConfirmation } from '@/lib/permissions.mjs'
 import { hasAttendanceClassAccess, hasTeacherAssignment, resolveTeacherProfileLink } from '@/lib/teacher-scope.mjs'
 import { hashPassword, validatePassword } from '@/lib/password.mjs'
@@ -392,7 +392,7 @@ export async function saveSchool(form: FormData): Promise<ActionResult> {
 
 export async function deleteSchool(form: FormData): Promise<ActionResult> {
   try {
-    const user = await requireUser('school:delete')
+    const user = await requirePlatformAdmin('school:delete')
     if (!canDeleteSchool(user.role)) throw new Error('Suppression réservée à l’administration plateforme.')
     const schoolId = id(form, 'schoolId')!
     const confirmation = text(form, 'confirmation', 1, 180)
@@ -406,6 +406,7 @@ export async function deleteSchool(form: FormData): Promise<ActionResult> {
       if (!result.length) throw new Error('Établissement introuvable.')
     })
     revalidatePath('/')
+    revalidatePath('/plateforme')
     return { ok: true, message: 'Établissement et données associées supprimés.' }
   } catch (error) {
     console.error('Suppression d’établissement refusée ou impossible', error)
@@ -415,14 +416,14 @@ export async function deleteSchool(form: FormData): Promise<ActionResult> {
 
 export async function createSchool(form: FormData): Promise<ActionResult> {
   try {
-    const user = await requireUser('school:create')
-    if (user.role !== 'super_admin') throw new Error('Action réservée à l’administration plateforme.')
+    await requirePlatformAdmin('school:create')
     const name = text(form, 'name', 2, 160)
     await db().begin(async (sql) => {
       const rows = await sql`INSERT INTO schools (name, city, country) VALUES (${name}, ${text(form, 'city', 1, 120)}, ${text(form, 'country', 1, 120)}) RETURNING id`
       await sql`INSERT INTO school_settings (school_id, academic_year, current_term) VALUES (${rows[0].id}, ${text(form, 'academicYear', 4, 20)}, 'Trimestre 1')`
     })
     revalidatePath('/')
+    revalidatePath('/plateforme')
     return { ok: true, message: 'Établissement créé.' }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Création impossible.' }

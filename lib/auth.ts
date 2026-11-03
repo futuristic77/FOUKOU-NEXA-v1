@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { db } from './db'
-import { hasPermission } from './permissions.mjs'
+import { hasPermission, isPlatformAdmin } from './permissions.mjs'
 import { hasActiveTeacherProfile } from './teacher-scope.mjs'
 import type { Role, SessionUser } from './types'
 
@@ -66,6 +66,12 @@ export async function requireUser(permission?: string) {
   const user = await getCurrentUser()
   if (!user) throw new Error('Authentification requise.')
   if (permission && !hasPermission(user.role, permission)) throw new Error('Vous n’avez pas la permission d’effectuer cette action.')
+  return user
+}
+
+export async function requirePlatformAdmin(permission = 'platform:read'): Promise<SessionUser> {
+  const user = await requireUser(permission)
+  if (!isPlatformAdmin(user)) throw new Error('Accès réservé à l’administration plateforme.')
   return user
 }
 

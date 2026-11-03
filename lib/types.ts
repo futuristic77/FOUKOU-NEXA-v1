@@ -2,6 +2,7 @@ export type Role = 'super_admin' | 'director' | 'administration' | 'teacher' | '
 export type ActionResult = { ok: boolean; message: string }
 export interface SessionUser { id: string; schoolId: string | null; email: string; fullName: string; role: Role }
 export interface School { id: string; name: string; city: string; country: string }
+export interface PlatformSchoolSummary { id: string; name: string; city: string; country: string; createdAt: string }
 export interface Student { id: string; studentNumber: string; fullName: string; classId: string; className: string; birthDate: string; guardianName: string; guardianPhone: string; status: 'active' | 'inactive'; enrolledAt: string }
 export interface Classroom { id: string; name: string; level: string; room: string; leadTeacherId: string | null; leadTeacher: string; enrolled: number }
 export interface Teacher { id: string; fullName: string; email: string; phone: string; status: 'active' | 'inactive'; assignments: string[] }
