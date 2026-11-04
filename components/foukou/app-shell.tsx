@@ -14,6 +14,7 @@ import { CommunicationView } from './communication-view'
 import { SettingsView } from './settings-view'
 import { demoAnnouncements, demoClassrooms, demoStudents, demoTeachers } from './data'
 import type { Announcement, Classroom, Student, Teacher, ViewKey } from './types'
+import { useLocalTestState } from './use-local-test-state'
 
 const viewLabels: Record<ViewKey, string> = {
   dashboard: 'Tableau de bord',
@@ -27,10 +28,26 @@ const viewLabels: Record<ViewKey, string> = {
 
 export function FoukouApp() {
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
-  const [students, setStudents] = useState<Student[]>(demoStudents)
-  const [classrooms, setClassrooms] = useState<Classroom[]>(demoClassrooms)
-  const [teachers, setTeachers] = useState<Teacher[]>(demoTeachers)
-  const [announcements, setAnnouncements] = useState<Announcement[]>(demoAnnouncements)
+  const studentsState = useLocalTestState<Student[]>('students', demoStudents)
+  const classroomsState = useLocalTestState<Classroom[]>('classrooms', demoClassrooms)
+  const teachersState = useLocalTestState<Teacher[]>('teachers', demoTeachers)
+  const announcementsState = useLocalTestState<Announcement[]>('announcements', demoAnnouncements)
+  const attendanceState = useLocalTestState<Record<string, boolean>>(
+    'attendance',
+    Object.fromEntries(demoStudents.map((student, index) => [student.id, index !== 2])),
+  )
+  const students = studentsState.value
+  const setStudents = studentsState.setValue
+  const classrooms = classroomsState.value
+  const setClassrooms = classroomsState.setValue
+  const teachers = teachersState.value
+  const setTeachers = teachersState.setValue
+  const announcements = announcementsState.value
+  const setAnnouncements = announcementsState.setValue
+  const attendance = attendanceState.value
+  const setAttendance = attendanceState.setValue
+  const dataReady = [studentsState, classroomsState, teachersState, announcementsState, attendanceState].every((item) => item.ready)
+  const dataStorageError = [studentsState, classroomsState, teachersState, announcementsState, attendanceState].some((item) => item.error)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
@@ -68,9 +85,9 @@ export function FoukouApp() {
     setProfileOpen(false)
   }
 
-  const studentTotal = 1248 + Math.max(0, students.length - demoStudents.length)
-  const classTotal = 32 + Math.max(0, classrooms.length - demoClassrooms.length)
-  const teacherTotal = 48 + Math.max(0, teachers.length - demoTeachers.length)
+  const studentTotal = students.length
+  const classTotal = classrooms.length
+  const teacherTotal = teachers.length
 
   let view: ReactNode
   switch (activeView) {
@@ -81,10 +98,10 @@ export function FoukouApp() {
       view = <TeachersView teachers={teachers} setTeachers={setTeachers} onNavigate={navigate} />
       break
     case 'grades':
-      view = <GradesView />
+      view = <GradesView students={students} />
       break
     case 'schedule':
-      view = <ScheduleView students={students} />
+      view = <ScheduleView students={students} attendance={attendance} setAttendance={setAttendance} />
       break
     case 'communication':
       view = <CommunicationView announcements={announcements} setAnnouncements={setAnnouncements} />
@@ -93,7 +110,11 @@ export function FoukouApp() {
       view = <SettingsView />
       break
     default:
-      view = <DashboardView onNavigate={navigate} studentTotal={studentTotal} classTotal={classTotal} teacherTotal={teacherTotal} />
+      view = <DashboardView onNavigate={navigate} studentTotal={studentTotal} classTotal={classTotal} teacherTotal={teacherTotal} students={students} attendance={attendance} />
+  }
+
+  if (!dataReady) {
+    return <div className="session-message" role="status">Chargement des données de test locales…</div>
   }
 
   return (
@@ -117,7 +138,7 @@ export function FoukouApp() {
             <div className="topbar-section-label"><span>ESPACE SCOLAIRE</span><strong>{viewLabels[activeView]}</strong></div>
           </div>
           <div className="topbar-actions">
-            <span className="topbar-demo-chip">DÉMO</span>
+            <span className="topbar-demo-chip">TEST LOCAL</span>
             <Button variant="ghost" size="icon-lg" className="topbar-icon-button" aria-label={darkMode ? 'Passer au thème clair' : 'Passer au thème sombre'} onClick={() => setDarkMode((value) => !value)}>
               {darkMode ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
             </Button>
@@ -152,9 +173,10 @@ export function FoukouApp() {
           </div>
         </header>
 
+        {dataStorageError ? <p className="session-message" role="alert">Le stockage local est indisponible ou illisible ; les modifications ne sont pas garanties. N’utilise pas de données réelles.</p> : null}
         <main id="main-content" className="app-content-area" tabIndex={-1}>
           {view}
-          <footer className="app-footer"><span>FOUKOU-NEXA · ESPACE SCOLAIRE</span><span>Maquette fonctionnelle · aucune donnée réelle</span></footer>
+          <footer className="app-footer"><span>FOUKOU-NEXA · ESPACE SCOLAIRE</span><span>Données de test locales · ce navigateur uniquement</span></footer>
         </main>
       </div>
     </div>
