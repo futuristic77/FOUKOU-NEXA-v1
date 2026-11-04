@@ -3,33 +3,18 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { loadSchoolRows } from '../lib/school-data-queries.mjs'
 import { updateSchoolProfile, updateSchoolSettings } from '../lib/school-admin-data.mjs'
+import { openTestDatabase, testDatabaseEnabled, assertRequiredMigration } from '../scripts/test-database-guard.mjs'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
-const enabled = Boolean(databaseUrl)
+const databaseTestsEnabled = testDatabaseEnabled()
 
-function assertIsolatedTestDatabase(value) {
-  const url = new URL(value)
-  const databaseName = decodeURIComponent(url.pathname.slice(1))
-  assert.ok(['localhost', '127.0.0.1', '::1'].includes(url.hostname), 'TEST_DATABASE_URL must point to localhost')
-  assert.match(databaseName, /(^|[_-])test($|[_-])/i, 'TEST_DATABASE_URL must use a database name containing “test”')
-}
-
-test('PostgreSQL empêche les relations entre établissements', { skip: !enabled }, async () => {
-  assertIsolatedTestDatabase(databaseUrl)
-  const { default: postgres } = await import('postgres')
-  const sql = postgres(databaseUrl, {
-    ssl: process.env.DATABASE_SSL === 'disable' ? false : 'require',
-    max: 1,
-    connect_timeout: 5,
-  })
+test('PostgreSQL empêche les relations entre établissements', { skip: !databaseTestsEnabled }, async () => {
+  const sql = await openTestDatabase()
   const suffix = randomUUID()
   let schoolA
   let schoolB
 
   try {
-    const applied = await sql`SELECT name FROM schema_migrations WHERE name = '002_tenant_integrity.sql'`
-    assert.equal(applied.length, 1, 'tenant integrity migration must be applied before integration tests')
-
+    await assertRequiredMigration(sql, '002_tenant_integrity.sql')
     const schools = await sql`
       INSERT INTO schools (name) VALUES (${`Test A ${suffix}`}), (${`Test B ${suffix}`})
       RETURNING id, name
@@ -165,14 +150,8 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !enabled
   }
 })
 
-test('les requêtes administratives restent limitées au school_id fourni', { skip: !enabled }, async () => {
-  assertIsolatedTestDatabase(databaseUrl)
-  const { default: postgres } = await import('postgres')
-  const sql = postgres(databaseUrl, {
-    ssl: process.env.DATABASE_SSL === 'disable' ? false : 'require',
-    max: 1,
-    connect_timeout: 5,
-  })
+test('les requêtes administratives restent limitées au school_id fourni', { skip: !databaseTestsEnabled }, async () => {
+  const sql = await openTestDatabase()
   const suffix = randomUUID()
   let schoolA
   let schoolB
@@ -187,9 +166,7 @@ test('les requêtes administratives restent limitées au school_id fourni', { sk
   }
 
   try {
-    const contactMigration = await sql`SELECT name FROM schema_migrations WHERE name = '003_school_contact_details.sql'`
-    assert.equal(contactMigration.length, 1, 'school contact migration must be applied before admin integration tests')
-
+    await assertRequiredMigration(sql, '003_school_contact_details.sql')
     const schools = await sql`
       INSERT INTO schools (name, city, country)
       VALUES (${`Admin A ${suffix}`}, 'Ville A', 'Pays A'), (${`Admin B ${suffix}`}, 'Ville B', 'Pays B')

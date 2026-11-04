@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { openTestDatabase, testDatabaseEnabled } from '../scripts/test-database-guard.mjs'
 
 test('le schéma couvre les modules métier et les clés d’isolation', async () => {
   const schema = await readFile(new URL('../migrations/001_initial.sql', import.meta.url), 'utf8')
@@ -39,9 +40,10 @@ test('la migration tenant ajoute et valide des clés étrangères composites', a
   assert.match(migration, /REFERENCES students \(school_id, id\)/)
 })
 
-test('connexion PostgreSQL en lecture seule', { skip: !process.env.DATABASE_URL }, async () => {
-  const { default: postgres } = await import('postgres')
-  const sql = postgres(process.env.DATABASE_URL, { ssl: process.env.DATABASE_SSL === 'disable' ? false : 'require', max: 1, connect_timeout: 5 })
+const databaseTestsEnabled = testDatabaseEnabled()
+
+test('connexion PostgreSQL en lecture seule vers le projet de test épinglé', { skip: !databaseTestsEnabled }, async () => {
+  const sql = await openTestDatabase()
   try {
     const result = await sql`SELECT 1 AS connected`
     assert.equal(result[0].connected, 1)
