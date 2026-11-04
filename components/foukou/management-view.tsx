@@ -71,7 +71,7 @@ export function ManagementView({
     setStudentClass('')
     setStudentFormOpen(false)
     setPage(1)
-    setMessage(`${name} apparaît dans cette session de démonstration. Aucune donnée n’a été sauvegardée.`)
+    setMessage(`${name} a été enregistré dans les données locales de test de ce navigateur.`)
   }
 
   function addClassroom(event: FormEvent<HTMLFormElement>) {
@@ -90,7 +90,7 @@ export function ManagementView({
     setNewClassName('')
     setNewClassRoom('')
     setClassFormOpen(false)
-    setMessage(`${label} a été ajoutée à l’aperçu local uniquement. Aucune donnée n’a été sauvegardée.`)
+    setMessage(`${label} a été enregistrée dans les données locales de test de ce navigateur.`)
   }
 
   const currentAction = tab === 'students'
@@ -105,7 +105,7 @@ export function ManagementView({
         description="Consultez les dossiers, les inscriptions et les classes de l’établissement."
         actions={<Button onClick={currentAction}><Plus data-icon="inline-start" aria-hidden="true" />{tab === 'students' ? 'Nouvelle inscription' : 'Nouvelle classe'}</Button>}
       />
-      <DemoNotice>Les dossiers affichés sont fictifs. Les ajouts ci-dessous ne vivent que dans cette session et ne sont pas transmis à un serveur.</DemoNotice>
+      <DemoNotice>Données d’élèves et de classes de test conservées dans ce navigateur uniquement ; ne saisis pas de données réelles.</DemoNotice>
 
       <Card className="management-card">
         <CardHeader className="management-card-header">
@@ -145,7 +145,7 @@ export function ManagementView({
               <label className="form-field"><span>Nom et prénom</span><input required value={studentName} onChange={(event) => setStudentName(event.target.value)} placeholder="Ex. Koffi Adjoua" autoComplete="off" /></label>
               <label className="form-field"><span>Classe</span><select required value={studentClass} onChange={(event) => setStudentClass(event.target.value)}><option value="">Choisir une classe</option>{classrooms.map((classroom) => <option key={classroom.id}>{classroom.label}</option>)}</select></label>
             </div>
-            <div className="inline-form-footer"><span>Visible jusqu’au rechargement de la page · non sauvegardé</span><Button type="submit">Ajouter à la démo <ArrowRight data-icon="inline-end" aria-hidden="true" /></Button></div>
+            <div className="inline-form-footer"><span>Enregistré dans ce navigateur uniquement</span><Button type="submit">Ajouter à la démo <ArrowRight data-icon="inline-end" aria-hidden="true" /></Button></div>
           </form>
         ) : null}
 
@@ -157,7 +157,7 @@ export function ManagementView({
               <label className="form-field"><span>Niveau</span><select value={newClassLevel} onChange={(event) => setNewClassLevel(event.target.value)}><option>Collège · 6e</option><option>Collège · 5e</option><option>Collège · 4e</option><option>Collège · 3e</option><option>Lycée · 2nde</option><option>Lycée · 1ère</option><option>Lycée · Terminale</option></select></label>
               <label className="form-field"><span>Salle (facultatif)</span><input value={newClassRoom} onChange={(event) => setNewClassRoom(event.target.value)} placeholder="À définir" /></label>
             </div>
-            <div className="inline-form-footer"><span>Visible jusqu’au rechargement de la page · non sauvegardé</span><Button type="submit">Ajouter à la démo <ArrowRight data-icon="inline-end" aria-hidden="true" /></Button></div>
+            <div className="inline-form-footer"><span>Enregistré dans ce navigateur uniquement</span><Button type="submit">Ajouter à la démo <ArrowRight data-icon="inline-end" aria-hidden="true" /></Button></div>
           </form>
         ) : null}
 
