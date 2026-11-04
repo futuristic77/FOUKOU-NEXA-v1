@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, FileCheck2, Printer, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { demoStudents } from './data'
 import { BrandLockup } from './brand-mark'
 import type { Student } from './types'
 import { DemoNotice, PageHeading } from './shared'
+import { useLocalTestState } from './use-local-test-state'
 
 const subjects = ['Mathématiques', 'Français', 'Sciences physiques']
 const periods = ['Trimestre 1', 'Trimestre 2', 'Trimestre 3']
@@ -19,8 +19,8 @@ type GradeRow = {
   appreciation: string
 }
 
-function makeDemoRows(className: string, subject: string, period: string): GradeRow[] {
-  const roster = demoStudents.filter((student) => student.className === className)
+function makeDemoRows(students: Student[], className: string, subject: string, period: string): GradeRow[] {
+  const roster = students.filter((student) => student.className === className)
   const subjectOffset = Math.max(0, subjects.indexOf(subject))
   const periodOffset = Math.max(0, periods.indexOf(period))
   return roster.map((student, index) => {
@@ -38,17 +38,19 @@ function average(scores: [number, number, number]) {
   return weightedTotal / coefficients.reduce((total, coefficient) => total + coefficient, 0)
 }
 
-export function GradesView() {
-  const classOptions = Array.from(new Set(demoStudents.map((student) => student.className)))
+export function GradesView({ students }: { students: Student[] }) {
+  const classOptions = Array.from(new Set(students.map((student) => student.className)))
   const [className, setClassName] = useState('5e B')
   const [subject, setSubject] = useState(subjects[0])
   const [period, setPeriod] = useState(periods[0])
-  const [gradeBook, setGradeBook] = useState<Record<string, GradeRow[]>>({})
+  const gradeBookState = useLocalTestState<Record<string, GradeRow[]>>('grades', {})
+  const gradeBook = gradeBookState.value
+  const setGradeBook = gradeBookState.setValue
   const [actionMessage, setActionMessage] = useState('')
   const [previewRow, setPreviewRow] = useState<GradeRow | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const bookKey = `${className}|${subject}|${period}`
-  const rows = gradeBook[bookKey] ?? makeDemoRows(className, subject, period)
+  const rows = gradeBook[bookKey] ?? makeDemoRows(students, className, subject, period)
   const classAverage = useMemo(() => rows.length ? rows.reduce((sum, row) => sum + average(row.scores), 0) / rows.length : 0, [rows])
 
   useEffect(() => {
@@ -76,6 +78,10 @@ export function GradesView() {
 
   const reportAverage = previewRow ? average(previewRow.scores) : 0
 
+  if (!gradeBookState.ready) {
+    return <div className="session-message" role="status">Chargement des notes locales de test…</div>
+  }
+
   return (
     <div className="section-view">
       <PageHeading
@@ -84,7 +90,7 @@ export function GradesView() {
         description="Saisissez les évaluations, vérifiez les moyennes pondérées et prévisualisez un bulletin A4."
         actions={<Button variant="outline" onClick={() => setActionMessage('La validation officielle est indisponible : aucun serveur d’établissement ni rôle de validation n’est connecté.')}><ShieldCheck data-icon="inline-start" aria-hidden="true" />État de validation</Button>}
       />
-      <DemoNotice>Les notes et moyennes sont des exemples modifiables en session. La validation officielle n’est pas active sans connexion à l’établissement.</DemoNotice>
+      <DemoNotice>Notes de test enregistrées dans ce navigateur uniquement. Aucune validation officielle ni synchronisation serveur n’est active.</DemoNotice>
 
       <Card className="grades-card">
         <CardHeader className="grades-toolbar">
@@ -96,6 +102,7 @@ export function GradesView() {
           <div className="grades-average-summary"><span>Moyenne de la classe · démo</span><strong>{classAverage.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}<small>/20</small></strong></div>
         </CardHeader>
 
+        {gradeBookState.error ? <p className="session-message" role="alert">Le stockage local des notes est indisponible ; les modifications ne sont pas garanties.</p> : null}
         {actionMessage ? <p className="session-message" role="status">{actionMessage}</p> : null}
 
         <div className="table-scroll desktop-record-table">
@@ -126,7 +133,7 @@ export function GradesView() {
 
         <div className="grades-card-footer">
           <p><strong>Calcul appliqué :</strong> moyenne pondérée selon les coefficients affichés, arrondie au dixième.</p>
-          <span>Les modifications restent dans la session de démonstration.</span>
+          <span>Modifications conservées dans ce navigateur, pour le test local.</span>
         </div>
       </Card>
 
