@@ -40,7 +40,7 @@ export function CommunicationView({
     setDate('')
     setSummary('')
     setFormOpen(false)
-    setMessage('Brouillon ajouté à cette session de démonstration. Aucun message n’a été envoyé aux familles.')
+    setMessage('Brouillon enregistré localement. Aucun message n’a été envoyé aux familles.')
   }
 
   return (
@@ -51,10 +51,10 @@ export function CommunicationView({
         description="Préparez les annonces de l’établissement et consultez les informations partagées."
         actions={<Button onClick={() => { setFormOpen((open) => !open); setMessage('') }}><Plus data-icon="inline-start" aria-hidden="true" />Rédiger une annonce</Button>}
       />
-      <DemoNotice>Les annonces et brouillons sont fictifs. Les messages rédigés restent locaux et ne sont jamais envoyés.</DemoNotice>
+      <DemoNotice>Annonces de test conservées dans ce navigateur. Les messages ne sont jamais envoyés et aucune famille n’est contactée.</DemoNotice>
 
       <div className="communication-summary-grid">
-        <Card className="communication-summary-card"><CardContent><span className="summary-icon"><Megaphone aria-hidden="true" /></span><span className="summary-label">Annonces d’exemple</span><strong>{announcements.length}</strong><span className="summary-foot">dans cette session</span></CardContent></Card>
+        <Card className="communication-summary-card"><CardContent><span className="summary-icon"><Megaphone aria-hidden="true" /></span><span className="summary-label">Annonces d’exemple</span><strong>{announcements.length}</strong><span className="summary-foot">dans ce navigateur</span></CardContent></Card>
         <Card className="communication-summary-card communication-summary-highlight"><CardContent><span className="summary-icon"><Send aria-hidden="true" /></span><span className="summary-label">Envoi aux familles</span><strong>Non connecté</strong><span className="summary-foot">aucune diffusion active</span></CardContent></Card>
       </div>
 
