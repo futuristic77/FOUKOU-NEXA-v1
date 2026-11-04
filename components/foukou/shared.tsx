@@ -29,7 +29,7 @@ export function DemoNotice({ children }: { children?: ReactNode }) {
     <div className="demo-notice" role="note">
       <Info aria-hidden="true" />
       <p>
-        {children ?? 'Données de démonstration : aucune connexion à un établissement ni sauvegarde durable.'}
+        {children ?? 'Données de test locales : enregistrées uniquement dans ce navigateur, non partagées et réservées aux tests.'}
       </p>
     </div>
   )
