@@ -40,9 +40,8 @@ import {
 import {
   demoActivities,
   enrollmentByYear,
-  levelDistribution,
 } from './data'
-import type { ViewKey } from './types'
+import type { Student, ViewKey } from './types'
 import { BrandMaskArt } from './brand-mark'
 import { DemoNotice } from './shared'
 
@@ -60,10 +59,15 @@ const distributionConfig = {
   final: { label: 'Tle', color: 'var(--chart-7)' },
 } satisfies ChartConfig
 
-const distribution = levelDistribution.map((level, index) => ({
-  ...level,
-  fill: `var(--color-${['sixth', 'fifth', 'fourth', 'third', 'second', 'first', 'final'][index]})`,
-}))
+const distributionLevels = [
+  { level: '6e', key: 'sixth' },
+  { level: '5e', key: 'fifth' },
+  { level: '4e', key: 'fourth' },
+  { level: '3e', key: 'third' },
+  { level: '2nde', key: 'second' },
+  { level: '1ère', key: 'first' },
+  { level: 'Tle', key: 'final' },
+] as const
 
 function MetricCard({
   icon: Icon,
@@ -102,12 +106,30 @@ export function DashboardView({
   studentTotal,
   classTotal,
   teacherTotal,
+  students,
+  attendance,
 }: {
   onNavigate: (view: ViewKey) => void
   studentTotal: number
   classTotal: number
   teacherTotal: number
+  students: Student[]
+  attendance: Record<string, boolean>
 }) {
+  const distribution = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const student of students) {
+      const level = student.className.trim().split(/\s+/)[0]
+      counts.set(level, (counts.get(level) ?? 0) + 1)
+    }
+    return distributionLevels.map(({ level, key }) => ({
+      level,
+      students: counts.get(level) ?? 0,
+      fill: `var(--color-${key})`,
+    }))
+  }, [students])
+  const presentCount = students.filter((student) => attendance[student.id] !== false).length
+  const attendanceRate = students.length ? Math.round((presentCount / students.length) * 100) : 0
   const [year, setYear] = useState<keyof typeof enrollmentByYear>('2026–2027')
   const chartData = useMemo(() => enrollmentByYear[year], [year])
   const dateLabel = new Intl.DateTimeFormat('fr-FR', {
@@ -129,7 +151,7 @@ export function DashboardView({
       <Card className="welcome-panel">
         <div className="welcome-panel-shade" aria-hidden="true" />
         <div className="welcome-copy">
-          <p className="welcome-eyebrow">BONJOUR, M. KONÉ</p>
+          <p className="welcome-eyebrow">ESPACE DE TEST LOCAL</p>
           <h1>Bienvenue sur <span className="welcome-brand-name">FOUKOU-NEXA</span></h1>
           <p className="welcome-description">Voici un aperçu de la vie de votre établissement.</p>
           <div className="welcome-date">
@@ -148,10 +170,10 @@ export function DashboardView({
       </Card>
 
       <div className="dashboard-metrics" aria-label="Indicateurs scolaires de démonstration">
-        <MetricCard icon={UsersRound} label="Élèves inscrits" value={studentTotal.toLocaleString('fr-FR')} delta="+12 %" detail="vs. l’année précédente" emphasis />
-        <MetricCard icon={GraduationCap} label="Classes" value={String(classTotal)} delta="+2" detail="nouvelles classes" />
-        <MetricCard icon={UserPlus} label="Enseignants" value={String(teacherTotal)} delta="+3" detail="sur l’année" />
-        <MetricCard icon={Check} label="Taux de présence" value="96 %" delta="+4 %" detail="vs. le mois dernier" />
+        <MetricCard icon={UsersRound} label="Élèves enregistrés" value={studentTotal.toLocaleString('fr-FR')} delta="local" detail="données de test" emphasis />
+        <MetricCard icon={GraduationCap} label="Classes locales" value={String(classTotal)} delta="local" detail="données de test" />
+        <MetricCard icon={UserPlus} label="Enseignants" value={String(teacherTotal)} delta="local" detail="données de test" />
+        <MetricCard icon={Check} label="Taux de présence" value={`${attendanceRate} %`} delta="calculé" detail="présences locales" />
       </div>
 
       <DemoNotice>Jeu de données fictif fourni pour illustrer l’interface. Aucune statistique ne provient d’un établissement connecté.</DemoNotice>
@@ -220,7 +242,7 @@ export function DashboardView({
                   <Area dataKey="students" type="monotone" stroke="var(--color-students)" strokeWidth={2.5} fill="url(#enrollment-fill)" activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
                 </AreaChart>
               </ChartContainer>
-              <p className="chart-caption">Effectifs mensuels · valeurs fictives</p>
+              <p className="chart-caption">Historique fictif de test · indépendant des listes locales</p>
             </CardContent>
           </Card>
 
@@ -250,7 +272,7 @@ export function DashboardView({
                   <li key={item.level}>
                     <span className="legend-dot" style={{ backgroundColor: item.fill }} aria-hidden="true" />
                     <span>{item.level}</span>
-                    <strong>{Math.round((item.students / 1248) * 100)} %</strong>
+                    <strong>{Math.round((item.students / Math.max(1, studentTotal)) * 100)} %</strong>
                   </li>
                 ))}
               </ul>
