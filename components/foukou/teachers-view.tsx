@@ -47,7 +47,7 @@ export function TeachersView({
     setSubject('')
     setClasses('')
     setFormOpen(false)
-    setMessage(`${teacher.name} apparaît dans l’annuaire de cette démo uniquement. Aucune donnée n’a été sauvegardée.`)
+    setMessage(`${teacher.name} a été enregistré dans l’annuaire local de test de ce navigateur.`)
   }
 
   return (
@@ -58,7 +58,7 @@ export function TeachersView({
         description="Affectations, échéances et accès rapides aux outils pédagogiques."
         actions={<Button onClick={() => setFormOpen((open) => !open)}><Plus data-icon="inline-start" aria-hidden="true" />Ajouter un enseignant</Button>}
       />
-      <DemoNotice>Annuaire et workflows fictifs. Les permissions réelles et l’enregistrement des données nécessitent une connexion sécurisée à l’établissement.</DemoNotice>
+      <DemoNotice>Annuaire et workflows de test conservés dans ce navigateur. Aucune permission réelle ni synchronisation serveur n’est active.</DemoNotice>
 
       <div className="teacher-summary-grid">
         <Card className="teacher-summary-card"><CardContent><span className="summary-icon"><UsersRound aria-hidden="true" /></span><span className="summary-label">Enseignants illustrés</span><strong>{teachers.length}</strong><span className="summary-foot">dans cet aperçu</span></CardContent></Card>
@@ -84,7 +84,7 @@ export function TeachersView({
                 <label className="form-field"><span>Matière</span><input required value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Ex. Français" /></label>
                 <label className="form-field"><span>Classes (séparées par des virgules)</span><input value={classes} onChange={(event) => setClasses(event.target.value)} placeholder="Ex. 5e B, 4e C" /></label>
               </div>
-              <div className="inline-form-footer"><span>Ajout temporaire à cette session · non sauvegardé</span><Button type="submit">Ajouter à la démo <ArrowRight data-icon="inline-end" aria-hidden="true" /></Button></div>
+              <div className="inline-form-footer"><span>Enregistré dans ce navigateur uniquement</span><Button type="submit">Ajouter à la démo <ArrowRight data-icon="inline-end" aria-hidden="true" /></Button></div>
             </form>
           ) : null}
 
