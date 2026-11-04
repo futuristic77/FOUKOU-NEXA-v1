@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from 'react'
 import { CalendarDays, Check, Clock3, UsersRound } from 'lucide-react'
+import type { Dispatch, SetStateAction } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { demoStudents } from './data'
 import type { Student } from './types'
 import { DemoNotice, EmptyState, PageHeading } from './shared'
 
@@ -39,11 +39,18 @@ const lessons: { day: string; time: string; lesson: Lesson }[] = [
   { day: 'Vendredi', time: '13:00', lesson: { subject: 'Éducation physique', className: '5e B', teacher: 'A. Bamba', room: 'Terrain' } },
 ]
 
-export function ScheduleView({ students = demoStudents }: { students?: Student[] }) {
+export function ScheduleView({
+  students,
+  attendance,
+  setAttendance,
+}: {
+  students: Student[]
+  attendance: Record<string, boolean>
+  setAttendance: Dispatch<SetStateAction<Record<string, boolean>>>
+}) {
   const [activeTab, setActiveTab] = useState<'schedule' | 'attendance'>('schedule')
   const [classFilter, setClassFilter] = useState('Toutes les classes')
   const [selectedDay, setSelectedDay] = useState('Lundi')
-  const [attendance, setAttendance] = useState<Record<string, boolean>>(() => Object.fromEntries(demoStudents.map((student, index) => [student.id, index !== 2])))
   const classOptions = Array.from(new Set(students.map((student) => student.className)))
 
   const visibleLessons = useMemo(() => lessons.filter(({ lesson }) => classFilter === 'Toutes les classes' || lesson.className === classFilter), [classFilter])
@@ -63,7 +70,7 @@ export function ScheduleView({ students = demoStudents }: { students?: Student[]
         title="Présences et emplois du temps"
         description="Consultez les cours de la semaine et explorez l’appel de présence sur un affichage tactile."
       />
-      <DemoNotice>Planning et présences fictifs. Les changements d’appel ne sont visibles que dans cette session et ne sont pas transmis à l’établissement.</DemoNotice>
+      <DemoNotice>Planning de test local. Les changements de présence sont enregistrés dans ce navigateur et ne sont pas transmis à l’établissement.</DemoNotice>
 
       <div className="schedule-controls-row">
         <div className="management-tabs schedule-tabs" role="tablist" aria-label="Choisir une vue">
