@@ -5,12 +5,15 @@ import { Check, Info, Save, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DemoNotice, PageHeading } from './shared'
+import { clearLocalTestData, useLocalTestState } from './use-local-test-state'
 
 type SettingsTab = 'establishment' | 'year' | 'grading' | 'roles'
 
 type SettingsDraft = {
   establishment: string
   city: string
+  country: string
+  periodMode: string
   year: string
   startDate: string
   endDate: string
@@ -22,6 +25,8 @@ type SettingsDraft = {
 const initialSettings: SettingsDraft = {
   establishment: 'Établissement de démonstration',
   city: 'Abidjan',
+  country: 'Côte d’Ivoire',
+  periodMode: 'Trimestres',
   year: '2026–2027',
   startDate: '2026-09-07',
   endDate: '2027-06-30',
@@ -39,8 +44,12 @@ const tabs: { key: SettingsTab; label: string }[] = [
 
 export function SettingsView() {
   const [tab, setTab] = useState<SettingsTab>('establishment')
-  const [draft, setDraft] = useState(initialSettings)
-  const [applied, setApplied] = useState(initialSettings)
+  const draftState = useLocalTestState<SettingsDraft>('settings-draft', initialSettings)
+  const appliedState = useLocalTestState<SettingsDraft>('settings-applied', initialSettings)
+  const draft = draftState.value
+  const setDraft = draftState.setValue
+  const applied = appliedState.value
+  const setApplied = appliedState.setValue
   const [message, setMessage] = useState('')
 
   function updateField(key: keyof SettingsDraft, value: string) {
@@ -51,7 +60,20 @@ export function SettingsView() {
   function applyPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setApplied(draft)
-    setMessage('Modifications appliquées à cet aperçu uniquement. Aucune sauvegarde durable n’est configurée.')
+    setMessage('Modifications enregistrées sur cet appareil uniquement. Aucune donnée n’est transmise à un serveur.')
+  }
+
+  function resetLocalTestData() {
+    if (!window.confirm('Réinitialiser les listes, notes, présences et paramètres locaux aux exemples de test ?')) return
+    if (!clearLocalTestData()) {
+      setMessage('Le navigateur n’a pas permis de réinitialiser les données locales.')
+      return
+    }
+    window.location.reload()
+  }
+
+  if (!draftState.ready || !appliedState.ready) {
+    return <div className="session-message" role="status">Chargement des paramètres locaux…</div>
   }
 
   return (
@@ -61,7 +83,7 @@ export function SettingsView() {
         title="Paramètres"
         description="Informations de l’établissement, périodes scolaires, calcul des moyennes et rôles."
       />
-      <DemoNotice>Les paramètres sont modifiables localement pour visualiser l’interface. Ils ne sont ni persistés ni appliqués à des comptes réels.</DemoNotice>
+      <DemoNotice>Paramètres de test conservés dans ce navigateur uniquement. Ne saisis pas de données réelles ou sensibles.</DemoNotice>
 
       <div className="settings-layout">
         <Card className="settings-navigation-card">
@@ -74,6 +96,7 @@ export function SettingsView() {
 
         <Card className="settings-panel">
           <CardHeader className="settings-panel-heading"><div><p className="eyebrow">{tabs.find((item) => item.key === tab)?.label.toLocaleUpperCase('fr-FR')}</p><CardTitle>{tab === 'establishment' ? 'Profil de l’établissement' : tab === 'year' ? 'Calendrier scolaire' : tab === 'grading' ? 'Moyennes et coefficients' : 'Aperçu des accès'}</CardTitle></div><span className="small-demo-tag">NON PERSISTANT</span></CardHeader>
+          {draftState.error || appliedState.error ? <p className="session-message" role="alert">Le stockage local des paramètres est indisponible ; les modifications ne sont pas garanties.</p> : null}
           {message ? <p className="session-message" role="status">{message}</p> : null}
 
           {tab === 'roles' ? (
@@ -87,20 +110,24 @@ export function SettingsView() {
             <CardContent>
               <form className="settings-form" onSubmit={applyPreview}>
                 {tab === 'establishment' ? (
-                  <div className="form-grid form-grid-2"><label className="form-field form-field-wide"><span>Nom de l’établissement</span><input value={draft.establishment} onChange={(event) => updateField('establishment', event.target.value)} required /></label><label className="form-field"><span>Ville</span><input value={draft.city} onChange={(event) => updateField('city', event.target.value)} required /></label><label className="form-field"><span>Pays</span><select defaultValue="Côte d’Ivoire"><option>Côte d’Ivoire</option><option>Sénégal</option><option>Autre</option></select></label><div className="settings-preview-callout"><span className="settings-preview-dot" /><div><strong>Nom dans l’aperçu</strong><span>{draft.establishment} · {draft.city}</span></div></div></div>
+                  <div className="form-grid form-grid-2"><label className="form-field form-field-wide"><span>Nom de l’établissement</span><input value={draft.establishment} onChange={(event) => updateField('establishment', event.target.value)} required /></label><label className="form-field"><span>Ville</span><input value={draft.city} onChange={(event) => updateField('city', event.target.value)} required /></label><label className="form-field"><span>Pays</span><select value={draft.country} onChange={(event) => updateField('country', event.target.value)}><option>Côte d’Ivoire</option><option>Sénégal</option><option>Autre</option></select></label><div className="settings-preview-callout"><span className="settings-preview-dot" /><div><strong>Nom dans l’aperçu</strong><span>{draft.establishment} · {draft.city}</span></div></div></div>
                 ) : null}
                 {tab === 'year' ? (
-                  <div className="form-grid form-grid-2"><label className="form-field"><span>Année scolaire</span><input value={draft.year} onChange={(event) => updateField('year', event.target.value)} required /></label><label className="form-field"><span>Rythme</span><select defaultValue="Trimestres"><option>Trimestres</option><option>Semestres</option></select></label><label className="form-field"><span>Date de rentrée</span><input type="date" value={draft.startDate} onChange={(event) => updateField('startDate', event.target.value)} /></label><label className="form-field"><span>Fin de l’année</span><input type="date" value={draft.endDate} onChange={(event) => updateField('endDate', event.target.value)} /></label></div>
+                  <div className="form-grid form-grid-2"><label className="form-field"><span>Année scolaire</span><input value={draft.year} onChange={(event) => updateField('year', event.target.value)} required /></label><label className="form-field"><span>Rythme</span><select value={draft.periodMode} onChange={(event) => updateField('periodMode', event.target.value)}><option>Trimestres</option><option>Semestres</option></select></label><label className="form-field"><span>Date de rentrée</span><input type="date" value={draft.startDate} onChange={(event) => updateField('startDate', event.target.value)} /></label><label className="form-field"><span>Fin de l’année</span><input type="date" value={draft.endDate} onChange={(event) => updateField('endDate', event.target.value)} /></label></div>
                 ) : null}
                 {tab === 'grading' ? (
                   <div className="grading-settings"><p>Les coefficients servent à illustrer le calcul affiché dans Notes et bulletins.</p><div className="form-grid form-grid-3"><label className="form-field"><span>Évaluation 1 · coefficient</span><input type="number" min="0.25" step="0.25" value={draft.coefficient1} onChange={(event) => updateField('coefficient1', event.target.value)} /></label><label className="form-field"><span>Évaluation 2 · coefficient</span><input type="number" min="0.25" step="0.25" value={draft.coefficient2} onChange={(event) => updateField('coefficient2', event.target.value)} /></label><label className="form-field"><span>Évaluation 3 · coefficient</span><input type="number" min="0.25" step="0.25" value={draft.coefficient3} onChange={(event) => updateField('coefficient3', event.target.value)} /></label></div><div className="settings-preview-callout"><span className="settings-preview-dot" /><div><strong>Barème de démonstration</strong><span>Notes sur 20 · arrondi au dixième</span></div></div></div>
                 ) : null}
-                <div className="settings-form-footer"><span>Application à l’aperçu local uniquement</span><Button type="submit"><Save data-icon="inline-start" aria-hidden="true" />Appliquer à l’aperçu</Button></div>
+                <div className="settings-form-footer"><span>Enregistré sur cet appareil uniquement</span><Button type="submit"><Save data-icon="inline-start" aria-hidden="true" />Appliquer à l’aperçu</Button></div>
               </form>
             </CardContent>
           )}
         </Card>
       </div>
+      <Card className="settings-panel">
+        <CardHeader><CardTitle>Données locales de test</CardTitle></CardHeader>
+        <CardContent><p>Les exemples et tes modifications restent dans ce navigateur. Cette action les réinitialise aux exemples de test initiaux.</p><Button variant="destructive" type="button" onClick={resetLocalTestData}>Réinitialiser les données de test</Button></CardContent>
+      </Card>
     </div>
   )
 }
