@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
-import { Check, Info, Save, Settings2 } from 'lucide-react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { Check, ImagePlus, Info, Save, Settings2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useEstablishment, establishmentInitials } from './establishment-context'
 import { DemoNotice, PageHeading } from './shared'
 
 type SettingsTab = 'establishment' | 'year' | 'grading' | 'roles'
@@ -11,6 +12,7 @@ type SettingsTab = 'establishment' | 'year' | 'grading' | 'roles'
 type SettingsDraft = {
   establishment: string
   city: string
+  country: string
   year: string
   startDate: string
   endDate: string
@@ -22,6 +24,7 @@ type SettingsDraft = {
 const initialSettings: SettingsDraft = {
   establishment: 'Établissement de démonstration',
   city: 'Abidjan',
+  country: 'Côte d’Ivoire',
   year: '2026–2027',
   startDate: '2026-09-07',
   endDate: '2027-06-30',
@@ -37,11 +40,23 @@ const tabs: { key: SettingsTab; label: string }[] = [
   { key: 'roles', label: 'Rôles et accès' },
 ]
 
+const LOGO_ACCEPT = 'image/png,image/jpeg,image/svg+xml,image/webp'
+const MAX_LOGO_BYTES = 2 * 1024 * 1024
+
 export function SettingsView() {
+  const { profile, hydrated, updateProfile, clearLogo } = useEstablishment()
   const [tab, setTab] = useState<SettingsTab>('establishment')
-  const [draft, setDraft] = useState(initialSettings)
+  const [draft, setDraft] = useState<SettingsDraft>(initialSettings)
   const [applied, setApplied] = useState(initialSettings)
   const [message, setMessage] = useState('')
+  const [logoError, setLogoError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!hydrated) return
+    setDraft((current) => ({ ...current, establishment: profile.name, city: profile.city, country: profile.country }))
+    setApplied((current) => ({ ...current, establishment: profile.name, city: profile.city, country: profile.country }))
+  }, [hydrated, profile.name, profile.city, profile.country])
 
   function updateField(key: keyof SettingsDraft, value: string) {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -51,7 +66,44 @@ export function SettingsView() {
   function applyPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setApplied(draft)
-    setMessage('Modifications appliquées à cet aperçu uniquement. Aucune sauvegarde durable n’est configurée.')
+    if (tab === 'establishment') {
+      updateProfile({ name: draft.establishment, city: draft.city, country: draft.country })
+      setMessage('Identité de l’établissement appliquée. Le nom et le logo apparaissent désormais sur les bulletins.')
+    } else {
+      setMessage('Modifications appliquées à cet aperçu uniquement. Aucune sauvegarde durable n’est configurée.')
+    }
+  }
+
+  function handleLogoFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setLogoError('')
+    if (!LOGO_ACCEPT.split(',').includes(file.type)) {
+      setLogoError('Format non pris en charge. Choisissez une image PNG, JPG, SVG ou WebP.')
+      return
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError('Image trop lourde : 2 Mo maximum pour préserver la qualité du PDF.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        updateProfile({ logoDataUrl: reader.result })
+        setMessage('Logo appliqué. Il remplace celui de FOUKOU-NEXA sur les bulletins PDF.')
+      } else {
+        setLogoError('Lecture du fichier impossible. Réessayez.')
+      }
+    }
+    reader.onerror = () => setLogoError('Lecture du fichier impossible. Réessayez.')
+    reader.readAsDataURL(file)
+  }
+
+  function removeLogo() {
+    clearLogo()
+    setLogoError('')
+    setMessage('Logo retiré. Les bulletins afficheront les initiales de l’établissement.')
   }
 
   return (
@@ -59,9 +111,9 @@ export function SettingsView() {
       <PageHeading
         eyebrow="CONFIGURATION · APERÇU"
         title="Paramètres"
-        description="Informations de l’établissement, périodes scolaires, calcul des moyennes et rôles."
+        description="Informations de l’établissement, logo officiel, périodes scolaires, calcul des moyennes et rôles."
       />
-      <DemoNotice>Les paramètres sont modifiables localement pour visualiser l’interface. Ils ne sont ni persistés ni appliqués à des comptes réels.</DemoNotice>
+      <DemoNotice>L’identité de l’établissement (nom, ville, logo) est conservée dans ce navigateur et réutilisée sur les bulletins PDF. Le reste des paramètres reste un aperçu local.</DemoNotice>
 
       <div className="settings-layout">
         <Card className="settings-navigation-card">
@@ -73,7 +125,7 @@ export function SettingsView() {
         </Card>
 
         <Card className="settings-panel">
-          <CardHeader className="settings-panel-heading"><div><p className="eyebrow">{tabs.find((item) => item.key === tab)?.label.toLocaleUpperCase('fr-FR')}</p><CardTitle>{tab === 'establishment' ? 'Profil de l’établissement' : tab === 'year' ? 'Calendrier scolaire' : tab === 'grading' ? 'Moyennes et coefficients' : 'Aperçu des accès'}</CardTitle></div><span className="small-demo-tag">NON PERSISTANT</span></CardHeader>
+          <CardHeader className="settings-panel-heading"><div><p className="eyebrow">{tabs.find((item) => item.key === tab)?.label.toLocaleUpperCase('fr-FR')}</p><CardTitle>{tab === 'establishment' ? 'Profil de l’établissement' : tab === 'year' ? 'Calendrier scolaire' : tab === 'grading' ? 'Moyennes et coefficients' : 'Aperçu des accès'}</CardTitle></div><span className="small-demo-tag">APERÇU LOCAL</span></CardHeader>
           {message ? <p className="session-message" role="status">{message}</p> : null}
 
           {tab === 'roles' ? (
@@ -87,7 +139,35 @@ export function SettingsView() {
             <CardContent>
               <form className="settings-form" onSubmit={applyPreview}>
                 {tab === 'establishment' ? (
-                  <div className="form-grid form-grid-2"><label className="form-field form-field-wide"><span>Nom de l’établissement</span><input value={draft.establishment} onChange={(event) => updateField('establishment', event.target.value)} required /></label><label className="form-field"><span>Ville</span><input value={draft.city} onChange={(event) => updateField('city', event.target.value)} required /></label><label className="form-field"><span>Pays</span><select defaultValue="Côte d’Ivoire"><option>Côte d’Ivoire</option><option>Sénégal</option><option>Autre</option></select></label><div className="settings-preview-callout"><span className="settings-preview-dot" /><div><strong>Nom dans l’aperçu</strong><span>{draft.establishment} · {draft.city}</span></div></div></div>
+                  <div className="form-grid form-grid-2">
+                    <label className="form-field form-field-wide"><span>Nom de l’établissement</span><input value={draft.establishment} onChange={(event) => updateField('establishment', event.target.value)} required /></label>
+                    <label className="form-field"><span>Ville</span><input value={draft.city} onChange={(event) => updateField('city', event.target.value)} required /></label>
+                    <label className="form-field"><span>Pays</span><select value={draft.country} onChange={(event) => updateField('country', event.target.value)}><option>Côte d’Ivoire</option><option>Sénégal</option><option>Mali</option><option>Burkina Faso</option><option>Autre</option></select></label>
+
+                    <div className="logo-upload-field form-field-wide">
+                      <span>Logo de l’établissement</span>
+                      <div className="logo-upload-row">
+                        <div className="logo-upload-preview">
+                          {profile.logoDataUrl ? (
+                            <img src={profile.logoDataUrl} alt={`Logo de ${profile.name}`} />
+                          ) : (
+                            <span className="logo-upload-monogram" aria-hidden="true">{establishmentInitials(profile.name)}</span>
+                          )}
+                        </div>
+                        <div className="logo-upload-copy">
+                          <div className="logo-upload-actions">
+                            <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}><ImagePlus data-icon="inline-start" aria-hidden="true" />{profile.logoDataUrl ? 'Remplacer le logo' : 'Téléverser un logo'}</Button>
+                            {profile.logoDataUrl ? <Button type="button" variant="ghost" size="sm" onClick={removeLogo}><Trash2 data-icon="inline-start" aria-hidden="true" />Retirer</Button> : null}
+                            <input ref={fileInputRef} type="file" accept={LOGO_ACCEPT} className="visually-hidden" aria-label="Choisir le logo de l’établissement" onChange={handleLogoFile} />
+                          </div>
+                          {logoError ? <p className="logo-upload-error" role="alert">{logoError}</p> : null}
+                          <p className="logo-upload-hint">PNG, JPG, SVG ou WebP · 2 Mo maximum. Le logo remplace celui de FOUKOU-NEXA en-tête des bulletins PDF.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="settings-preview-callout"><span className="settings-preview-dot" /><div><strong>Identité dans l’aperçu</strong><span>{draft.establishment} · {draft.city}</span></div></div>
+                  </div>
                 ) : null}
                 {tab === 'year' ? (
                   <div className="form-grid form-grid-2"><label className="form-field"><span>Année scolaire</span><input value={draft.year} onChange={(event) => updateField('year', event.target.value)} required /></label><label className="form-field"><span>Rythme</span><select defaultValue="Trimestres"><option>Trimestres</option><option>Semestres</option></select></label><label className="form-field"><span>Date de rentrée</span><input type="date" value={draft.startDate} onChange={(event) => updateField('startDate', event.target.value)} /></label><label className="form-field"><span>Fin de l’année</span><input type="date" value={draft.endDate} onChange={(event) => updateField('endDate', event.target.value)} /></label></div>
