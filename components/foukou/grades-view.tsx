@@ -5,7 +5,7 @@ import { ArrowRight, FileCheck2, Printer, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { demoStudents } from './data'
-import { BrandLockup } from './brand-mark'
+import { useEstablishment, establishmentInitials } from './establishment-context'
 import type { Student } from './types'
 import { DemoNotice, PageHeading } from './shared'
 
@@ -159,20 +159,40 @@ function BulletinDocument({
   period: string
   mean: number
 }) {
+  const { profile } = useEstablishment()
+  const schoolLocation = [profile.city, profile.country].filter(Boolean).join(' · ')
+
   return (
     <article className="bulletin-document">
-      <div className="bulletin-document-header">
-        <div className="bulletin-brand-block"><BrandLockup className="bulletin-brand-art" /><p className="bulletin-school-line">Établissement scolaire · document de démonstration</p></div>
-        <div className="bulletin-period"><span>ANNÉE SCOLAIRE</span><strong>2026–2027</strong><span>{period}</span></div>
-      </div>
+      <header className="bulletin-document-header">
+        <div className="bulletin-school">
+          {profile.logoDataUrl ? (
+            <img className="bulletin-school-logo" src={profile.logoDataUrl} alt={`Logo de ${profile.name}`} />
+          ) : (
+            <span className="bulletin-school-monogram" aria-hidden="true">{establishmentInitials(profile.name)}</span>
+          )}
+          <div className="bulletin-school-identity">
+            <strong>{profile.name}</strong>
+            {schoolLocation ? <span>{schoolLocation}</span> : null}
+          </div>
+        </div>
+        <div className="bulletin-period">
+          <span>Année scolaire</span>
+          <strong>2026–2027</strong>
+          <span>{period}</span>
+        </div>
+      </header>
       <div className="bulletin-rule" />
       <p className="eyebrow">BULLETIN DE NOTES · APERÇU FICTIF</p>
       <h2>Relevé de {subject}</h2>
       <dl className="bulletin-student-details"><div><dt>Élève</dt><dd>{row.student.name}</dd></div><div><dt>Classe</dt><dd>{className}</dd></div><div><dt>Identifiant</dt><dd>{row.student.id}</dd></div></dl>
       <table className="bulletin-table"><thead><tr><th>Matière</th><th>Évaluation 1</th><th>Évaluation 2</th><th>Évaluation 3</th><th>Moyenne</th></tr></thead><tbody><tr><td>{subject}</td>{row.scores.map((score, index) => <td key={index}>{score.toLocaleString('fr-FR')}/20 <small>· coeff. {coefficients[index]}</small></td>)}<td><strong>{mean.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/20</strong></td></tr></tbody></table>
       <section className="bulletin-appreciation"><h3>Appréciation</h3><p>{row.appreciation || 'Aucune appréciation saisie.'}</p></section>
-      <p className="bulletin-demo-note">Document fictif généré dans une interface de démonstration. Il n’a aucune valeur administrative.</p>
-      <div className="bulletin-signatures"><span>Le professeur</span><span>La direction</span></div>
+      <div className="bulletin-signatures">
+        <div className="bulletin-signature"><span>Le professeur</span><span className="signature-line" aria-hidden="true" /></div>
+        <div className="bulletin-signature"><span>La direction</span><span className="signature-line" aria-hidden="true" /></div>
+      </div>
+      <p className="bulletin-demo-note">Document fictif généré dans une interface de démonstration — il n’a aucune valeur administrative.</p>
     </article>
   )
 }
