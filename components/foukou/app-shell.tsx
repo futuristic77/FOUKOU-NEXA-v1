@@ -12,6 +12,7 @@ import { GradesView } from './grades-view'
 import { ScheduleView } from './schedule-view'
 import { CommunicationView } from './communication-view'
 import { SettingsView } from './settings-view'
+import { EstablishmentProvider } from './establishment-context'
 import { demoAnnouncements, demoClassrooms, demoStudents, demoTeachers } from './data'
 import type { Announcement, Classroom, Student, Teacher, ViewKey } from './types'
 
@@ -97,7 +98,8 @@ export function FoukouApp() {
   }
 
   return (
-    <div className={`school-app${darkMode ? ' dark' : ''}${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
+    <EstablishmentProvider>
+      <div className={`school-app${darkMode ? ' dark' : ''}${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
       <Sidebar
         activeView={activeView}
         collapsed={sidebarCollapsed}
@@ -157,7 +159,8 @@ export function FoukouApp() {
           <footer className="app-footer"><span>FOUKOU-NEXA · ESPACE SCOLAIRE</span><span>Maquette fonctionnelle · aucune donnée réelle</span></footer>
         </main>
       </div>
-    </div>
+      </div>
+    </EstablishmentProvider>
   )
 }
 
