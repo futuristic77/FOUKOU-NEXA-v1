@@ -1,5 +1,7 @@
 # Validation PostgreSQL de FOUKOU-NEXA
 
+> **Mise à jour Phase 3 (2026-11-12)** : la mention historique ci-dessous selon laquelle le projet Supabase était exclusivement dédié aux tests n’est pas considérée comme une preuve suffisante d’isolation dans cette phase. L’identité et l’allowlist restent inchangées; aucune connexion, migration ou écriture n’a été faite. Le garde PostgreSQL refuse désormais les rôles de test capables de créer des bases, rôles ou schémas. Toute validation indépendante du projet et de son rôle doit précéder un test avec écriture.
+
 ## Objectif général
 
 Valider le fonctionnement réel de FOUKOU-NEXA avec PostgreSQL, ses migrations, les parcours de gestion scolaire, les comptes, les transactions et l’isolation inter-établissements. Corriger uniquement les défauts confirmés, ajouter des tests de non-régression et conserver une progression reprenable sans utiliser de base de production.

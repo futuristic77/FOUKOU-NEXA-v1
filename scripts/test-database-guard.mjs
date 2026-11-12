@@ -89,12 +89,12 @@ export function assertTestDatabasePrivileges(privileges) {
   const expected = {
     role_name: approvedTestDatabase.role,
     is_superuser: false,
-    can_create_database: true,
-    can_create_roles: true,
+    can_create_database: false,
+    can_create_roles: false,
     can_connect: true,
-    can_create_schema_objects: true,
+    can_create_schema_objects: false,
     can_use_public_schema: true,
-    can_create_in_public: true,
+    can_create_in_public: false,
   }
 
   if (Object.entries(expected).some(([key, value]) => privileges?.[key] !== value)) {

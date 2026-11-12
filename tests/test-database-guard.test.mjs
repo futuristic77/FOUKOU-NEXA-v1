@@ -27,12 +27,12 @@ const validIdentity = {
 const validPrivileges = {
   role_name: 'postgres',
   is_superuser: false,
-  can_create_database: true,
-  can_create_roles: true,
+  can_create_database: false,
+  can_create_roles: false,
   can_connect: true,
-  can_create_schema_objects: true,
+  can_create_schema_objects: false,
   can_use_public_schema: true,
-  can_create_in_public: true,
+  can_create_in_public: false,
 }
 
 test('le garde accepte uniquement l’URL épinglée au projet Supabase de test', () => {
@@ -60,5 +60,7 @@ test('le garde vérifie le profil de privilèges relu sur le projet de test', ()
   assert.doesNotThrow(() => assertTestDatabasePrivileges(validPrivileges))
   assert.throws(() => assertTestDatabasePrivileges({ ...validPrivileges, is_superuser: true }), /privileges differ/)
   assert.throws(() => assertTestDatabasePrivileges({ ...validPrivileges, can_connect: false }), /privileges differ/)
-  assert.throws(() => assertTestDatabasePrivileges({ ...validPrivileges, can_create_in_public: false }), /privileges differ/)
+  assert.throws(() => assertTestDatabasePrivileges({ ...validPrivileges, can_create_database: true }), /privileges differ/)
+  assert.throws(() => assertTestDatabasePrivileges({ ...validPrivileges, can_create_roles: true }), /privileges differ/)
+  assert.throws(() => assertTestDatabasePrivileges({ ...validPrivileges, can_create_in_public: true }), /privileges differ/)
 })

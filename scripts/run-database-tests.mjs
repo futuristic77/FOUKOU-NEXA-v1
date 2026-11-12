@@ -14,9 +14,27 @@ if (process.exitCode === undefined) {
     fileURLToPath(new URL('../tests/database.test.mjs', import.meta.url)),
     fileURLToPath(new URL('../tests/database.integration.test.mjs', import.meta.url)),
   ]
+  const testEnvironment = { ...process.env, REQUIRE_TEST_DATABASE: '1' }
+  for (const name of [
+    'DATABASE_URL',
+    'DATABASE_SSL',
+    'POSTGRES_DATABASE',
+    'POSTGRES_HOST',
+    'POSTGRES_PASSWORD',
+    'POSTGRES_PRISMA_URL',
+    'POSTGRES_URL',
+    'POSTGRES_URL_NON_POOLING',
+    'POSTGRES_USER',
+    'SUPABASE_DB_URL',
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'SUPABASE_SECRET_KEY',
+    'SUPABASE_JWT_SECRET',
+  ]) delete testEnvironment[name]
+
   const result = spawnSync(process.execPath, ['--test', ...testFiles], {
     cwd: process.cwd(),
-    env: { ...process.env, REQUIRE_TEST_DATABASE: '1' },
+    env: testEnvironment,
     stdio: 'inherit',
   })
 

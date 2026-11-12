@@ -15,6 +15,7 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !databas
 
   try {
     await assertRequiredMigration(sql, '002_tenant_integrity.sql')
+    await assertRequiredMigration(sql, '004_attendance_recorder_tenant_fk.sql')
     const schools = await sql`
       INSERT INTO schools (name) VALUES (${`Test A ${suffix}`}), (${`Test B ${suffix}`})
       RETURNING id, name
@@ -36,6 +37,12 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !databas
       VALUES (${schoolA}, ${`other-${suffix}@example.test`}, 'Other A staff', 'test-hash', 'director')
       RETURNING id
     `
+    const recorderRows = await sql`
+      INSERT INTO users (school_id, email, full_name, password_hash, role)
+      VALUES (${schoolA}, ${`recorder-${suffix}@example.test`}, 'Presence recorder', 'test-hash', 'secretary')
+      RETURNING id
+    `
+    const recorderId = recorderRows[0].id
 
     const teachers = await sql`
       INSERT INTO teachers (school_id, user_id, full_name)
@@ -102,6 +109,8 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !databas
       tx`INSERT INTO grades (school_id, student_id, subject_id, term, assessment, score, max_score) VALUES (${schoolA}, ${studentA}, ${subjectB}, 'T1', 'Test', 10, 20)`)
     await expectForeignKey('attendance_school_class_fkey', (tx) =>
       tx`INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status) VALUES (${schoolA}, ${studentA}, ${classB}, CURRENT_DATE, 'present')`)
+    await expectForeignKey('attendance_school_recorded_by_fkey', (tx) =>
+      tx`INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status, recorded_by) VALUES (${schoolA}, ${studentA}, ${classA}, CURRENT_DATE, 'present', ${userB})`)
     await expectForeignKey('schedules_school_subject_fkey', (tx) =>
       tx`INSERT INTO schedules (school_id, class_id, subject_id, weekday, starts_at, ends_at) VALUES (${schoolA}, ${classA}, ${subjectB}, 1, '08:00', '09:00')`)
     await expectForeignKey('communications_school_author_fkey', (tx) =>
@@ -110,11 +119,15 @@ test('PostgreSQL empêche les relations entre établissements', { skip: !databas
       tx`INSERT INTO activity_logs (school_id, actor_id, kind, title) VALUES (${schoolA}, ${userB}, 'test', 'Cross tenant')`)
 
     const validAttendance = await sql`
-      INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status)
-      VALUES (${schoolA}, ${studentA}, ${classA}, CURRENT_DATE, 'present')
+      INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status, recorded_by)
+      VALUES (${schoolA}, ${studentA}, ${classA}, CURRENT_DATE, 'present', ${recorderId})
       RETURNING id
     `
     assert.equal(validAttendance.length, 1)
+    await sql`DELETE FROM users WHERE id=${recorderId} AND school_id=${schoolA}`
+    const attendanceAfterRecorderDeletion = await sql`SELECT school_id, recorded_by FROM attendance WHERE id=${validAttendance[0].id}`
+    assert.equal(attendanceAfterRecorderDeletion[0].school_id, schoolA)
+    assert.equal(attendanceAfterRecorderDeletion[0].recorded_by, null)
 
     await sql`INSERT INTO teacher_assignments (school_id, teacher_id, class_id, subject_id) VALUES (${schoolA}, ${teacherA}, ${classA}, ${subjectA})`
     await sql`INSERT INTO grades (school_id, student_id, subject_id, teacher_id, term, assessment, score, max_score) VALUES (${schoolA}, ${studentA}, ${subjectA}, ${teacherA}, 'T1', 'Exam A', 15, 20)`

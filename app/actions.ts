@@ -1,8 +1,9 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import type { TransactionSql } from 'postgres'
-import { db, logActivity } from '@/lib/db'
+import type { Sql, TransactionSql } from 'postgres'
+import { db, logActivity, logPlatformActivity } from '@/lib/db'
+import { assertActiveDirectorRemains } from '@/lib/account-guards.mjs'
 import { actionErrorMessage } from '@/lib/action-errors.mjs'
 import { updateSchoolProfile, updateSchoolSettings } from '@/lib/school-admin-data.mjs'
 import { requirePlatformAdmin, requireSchool, requireUser } from '@/lib/auth'
@@ -25,24 +26,24 @@ async function perform(permission: string, work: (user: SessionUser, schoolId: s
   }
 }
 
-async function assertClass(sql: ReturnType<typeof db>, classId: string, schoolId: string) {
+async function assertClass(sql: Sql | TransactionSql, classId: string, schoolId: string) {
   const rows = await sql`SELECT id FROM classes WHERE id = ${classId} AND school_id = ${schoolId}`
   if (!rows.length) throw new Error('Classe introuvable dans cet établissement.')
 }
 
-async function assertTeacher(sql: ReturnType<typeof db>, teacherId: string | null, schoolId: string) {
+async function assertTeacher(sql: Sql | TransactionSql, teacherId: string | null, schoolId: string) {
   if (!teacherId) return
   const rows = await sql`SELECT id FROM teachers WHERE id = ${teacherId} AND school_id = ${schoolId}`
   if (!rows.length) throw new Error('Enseignant introuvable dans cet établissement.')
 }
 
-async function assertSubject(sql: ReturnType<typeof db>, subjectId: string, schoolId: string) {
+async function assertSubject(sql: Sql | TransactionSql, subjectId: string, schoolId: string) {
   const rows = await sql`SELECT id FROM subjects WHERE id = ${subjectId} AND school_id = ${schoolId}`
   if (!rows.length) throw new Error('Matière introuvable dans cet établissement.')
 }
 
-async function assertStudent(sql: ReturnType<typeof db>, studentId: string, schoolId: string) {
-  const rows = await sql`SELECT id, class_id FROM students WHERE id = ${studentId} AND school_id = ${schoolId}`
+async function assertStudent(sql: Sql | TransactionSql, studentId: string, schoolId: string) {
+  const rows = await sql`SELECT id, class_id FROM students WHERE id = ${studentId} AND school_id = ${schoolId} FOR SHARE`
   if (!rows.length) throw new Error('Élève introuvable dans cet établissement.')
   return rows[0]
 }
@@ -60,7 +61,13 @@ async function getTeacherAssignments(user: SessionUser, schoolId: string, sql: R
   `
 }
 
-async function assertTeacherScope(user: SessionUser, schoolId: string, classId: string, subjectId?: string, sql = db()) {
+async function assertTeacherScope(
+  user: SessionUser,
+  schoolId: string,
+  classId: string,
+  subjectId?: string,
+  sql: Sql | TransactionSql = db(),
+) {
   if (user.role !== 'teacher') return
   const rows = await getTeacherAssignments(user, schoolId, sql)
   if (!hasTeacherAssignment(rows, classId, subjectId)) throw new Error('Cette classe ou matière ne fait pas partie de vos affectations.')
@@ -73,16 +80,18 @@ export async function saveStudent(form: FormData): Promise<ActionResult> {
     const fullName = text(form, 'fullName', 2, 160)
     const studentNumber = text(form, 'studentNumber', 1, 50)
     const status = choice(form, 'status', ['active', 'inactive'] as const)
-    const sql = db()
-    await assertClass(sql, classId, schoolId)
-    const values = { fullName, studentNumber, classId, status }
-    if (studentId) {
-      const result = await sql`UPDATE students SET full_name=${fullName}, student_number=${studentNumber}, class_id=${classId}, birth_date=${date(form, 'birthDate', false)}, guardian_name=${optionalText(form, 'guardianName', 160)}, guardian_phone=${optionalText(form, 'guardianPhone', 40)}, status=${status}, updated_at=now() WHERE id=${studentId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Dossier élève introuvable.')
-    } else {
-      await sql`INSERT INTO students (school_id, class_id, student_number, full_name, birth_date, guardian_name, guardian_phone, status, enrolled_at) VALUES (${schoolId}, ${classId}, ${studentNumber}, ${fullName}, ${date(form, 'birthDate', false)}, ${optionalText(form, 'guardianName', 160)}, ${optionalText(form, 'guardianPhone', 40)}, ${status}, ${date(form, 'enrolledAt')})`
-    }
-    await logActivity(sql, schoolId, user.id, 'student', studentId ? 'Dossier élève modifié' : 'Nouvelle inscription', `${fullName} · ${values.studentNumber}`)
+    await db().begin(async (tx) => {
+      await assertClass(tx, classId, schoolId)
+      let savedStudentId = studentId
+      if (studentId) {
+        const result = await tx`UPDATE students SET full_name=${fullName}, student_number=${studentNumber}, class_id=${classId}, birth_date=${date(form, 'birthDate', false)}, guardian_name=${optionalText(form, 'guardianName', 160)}, guardian_phone=${optionalText(form, 'guardianPhone', 40)}, status=${status}, updated_at=now() WHERE id=${studentId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Dossier élève introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO students (school_id, class_id, student_number, full_name, birth_date, guardian_name, guardian_phone, status, enrolled_at) VALUES (${schoolId}, ${classId}, ${studentNumber}, ${fullName}, ${date(form, 'birthDate', false)}, ${optionalText(form, 'guardianName', 160)}, ${optionalText(form, 'guardianPhone', 40)}, ${status}, ${date(form, 'enrolledAt')}) RETURNING id`
+        savedStudentId = rows[0].id
+      }
+      await logActivity(tx, schoolId, user.id, 'student', studentId ? 'Dossier élève modifié' : 'Nouvelle inscription', `student_id=${savedStudentId}`)
+    })
     return studentId ? 'Dossier élève mis à jour.' : 'Élève inscrit et dossier enregistré.'
   })
 }
@@ -90,9 +99,11 @@ export async function saveStudent(form: FormData): Promise<ActionResult> {
 export async function deleteStudent(form: FormData): Promise<ActionResult> {
   return perform('students:write', async (user, schoolId) => {
     const studentId = id(form)!
-    const result = await db()`DELETE FROM students WHERE id=${studentId} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Dossier élève introuvable.')
-    await logActivity(db(), schoolId, user.id, 'student', 'Dossier élève supprimé')
+    await db().begin(async (tx) => {
+      const result = await tx`DELETE FROM students WHERE id=${studentId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Dossier élève introuvable.')
+      await logActivity(tx, schoolId, user.id, 'student', 'Dossier élève supprimé', `student_id=${studentId}`)
+    })
     return 'Dossier élève et données liées supprimés.'
   })
 }
@@ -104,21 +115,26 @@ export async function saveClass(form: FormData): Promise<ActionResult> {
     const name = text(form, 'name', 1, 80)
     const level = text(form, 'level', 1, 80)
     const room = optionalText(form, 'room', 80)
-    const sql = db()
-    await assertTeacher(sql, leadTeacherId, schoolId)
-    if (classId) {
-      const result = await sql`UPDATE classes SET name=${name}, level=${level}, room=${room}, lead_teacher_id=${leadTeacherId}, updated_at=now() WHERE id=${classId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Classe introuvable.')
-    } else await sql`INSERT INTO classes (school_id, name, level, room, lead_teacher_id) VALUES (${schoolId}, ${name}, ${level}, ${room}, ${leadTeacherId})`
-    await logActivity(sql, schoolId, user.id, 'class', classId ? 'Classe modifiée' : 'Classe créée', name)
+    await db().begin(async (tx) => {
+      await assertTeacher(tx, leadTeacherId, schoolId)
+      if (classId) {
+        const result = await tx`UPDATE classes SET name=${name}, level=${level}, room=${room}, lead_teacher_id=${leadTeacherId}, updated_at=now() WHERE id=${classId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Classe introuvable.')
+      } else await tx`INSERT INTO classes (school_id, name, level, room, lead_teacher_id) VALUES (${schoolId}, ${name}, ${level}, ${room}, ${leadTeacherId})`
+      await logActivity(tx, schoolId, user.id, 'class', classId ? 'Classe modifiée' : 'Classe créée', classId ? `class_id=${classId}` : name)
+    })
     return classId ? 'Classe mise à jour.' : 'Classe créée.'
   })
 }
 
 export async function deleteClass(form: FormData): Promise<ActionResult> {
-  return perform('classes:write', async (_user, schoolId) => {
-    const result = await db()`DELETE FROM classes WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Classe introuvable.')
+  return perform('classes:write', async (user, schoolId) => {
+    const classId = id(form)!
+    await db().begin(async (tx) => {
+      const result = await tx`DELETE FROM classes WHERE id=${classId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Classe introuvable.')
+      await logActivity(tx, schoolId, user.id, 'class', 'Classe supprimée', `class_id=${classId}`)
+    })
     return 'Classe supprimée.'
   })
 }
@@ -128,18 +144,23 @@ export async function saveTeacher(form: FormData): Promise<ActionResult> {
     const teacherId = id(form, 'id', false)
     const fullName = text(form, 'fullName', 2, 160)
     const status = choice(form, 'status', ['active', 'inactive'] as const)
-    const sql = db()
-    if (teacherId) {
-      const result = await sql`UPDATE teachers SET full_name=${fullName}, email=${email(form)}, phone=${optionalText(form, 'phone', 40)}, status=${status}, updated_at=now() WHERE id=${teacherId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Enseignant introuvable.')
-    } else await sql`INSERT INTO teachers (school_id, full_name, email, phone, status) VALUES (${schoolId}, ${fullName}, ${email(form)}, ${optionalText(form, 'phone', 40)}, ${status})`
-    await logActivity(sql, schoolId, user.id, 'teacher', teacherId ? 'Fiche enseignant modifiée' : 'Enseignant ajouté', fullName)
+    await db().begin(async (tx) => {
+      let savedTeacherId = teacherId
+      if (teacherId) {
+        const result = await tx`UPDATE teachers SET full_name=${fullName}, email=${email(form)}, phone=${optionalText(form, 'phone', 40)}, status=${status}, updated_at=now() WHERE id=${teacherId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Enseignant introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO teachers (school_id, full_name, email, phone, status) VALUES (${schoolId}, ${fullName}, ${email(form)}, ${optionalText(form, 'phone', 40)}, ${status}) RETURNING id`
+        savedTeacherId = rows[0].id
+      }
+      await logActivity(tx, schoolId, user.id, 'teacher', teacherId ? 'Fiche enseignant modifiée' : 'Enseignant ajouté', `teacher_id=${savedTeacherId}`)
+    })
     return teacherId ? 'Fiche enseignant mise à jour.' : 'Enseignant ajouté.'
   })
 }
 
 export async function deleteTeacher(form: FormData): Promise<ActionResult> {
-  return perform('teachers:write', async (_user, schoolId) => {
+  return perform('teachers:write', async (user, schoolId) => {
     const teacherId = id(form)!
     await db().begin(async (tx) => {
       const teachers = await tx`SELECT user_id AS "userId" FROM teachers WHERE id=${teacherId} AND school_id=${schoolId} FOR UPDATE`
@@ -153,6 +174,7 @@ export async function deleteTeacher(form: FormData): Promise<ActionResult> {
 
       const result = await tx`DELETE FROM teachers WHERE id=${teacherId} AND school_id=${schoolId}`
       if (!result.count) throw new Error('Enseignant introuvable.')
+      await logActivity(tx, schoolId, user.id, 'teacher', 'Fiche enseignant supprimée', `teacher_id=${teacherId}`)
     })
     return 'Enseignant supprimé.'
   })
@@ -163,20 +185,29 @@ export async function saveSubject(form: FormData): Promise<ActionResult> {
     const subjectId = id(form, 'id', false)
     const name = text(form, 'name', 1, 120)
     const coefficient = number(form, 'coefficient', 0.01, 100)
-    const sql = db()
-    if (subjectId) {
-      const result = await sql`UPDATE subjects SET name=${name}, coefficient=${coefficient}, updated_at=now() WHERE id=${subjectId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Matière introuvable.')
-    } else await sql`INSERT INTO subjects (school_id, name, coefficient) VALUES (${schoolId}, ${name}, ${coefficient})`
-    await logActivity(sql, schoolId, user.id, 'grade', subjectId ? 'Coefficient modifié' : 'Matière créée', `${name} · coeff. ${coefficient}`)
+    await db().begin(async (tx) => {
+      let savedSubjectId = subjectId
+      if (subjectId) {
+        const result = await tx`UPDATE subjects SET name=${name}, coefficient=${coefficient}, updated_at=now() WHERE id=${subjectId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Matière introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO subjects (school_id, name, coefficient) VALUES (${schoolId}, ${name}, ${coefficient}) RETURNING id`
+        savedSubjectId = rows[0].id
+      }
+      await logActivity(tx, schoolId, user.id, 'grade', subjectId ? 'Coefficient modifié' : 'Matière créée', `subject_id=${savedSubjectId};coefficient=${coefficient}`)
+    })
     return subjectId ? 'Matière et coefficient mis à jour.' : 'Matière et coefficient créés.'
   })
 }
 
 export async function deleteSubject(form: FormData): Promise<ActionResult> {
-  return perform('subjects:write', async (_user, schoolId) => {
-    const result = await db()`DELETE FROM subjects WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Matière introuvable.')
+  return perform('subjects:write', async (user, schoolId) => {
+    const subjectId = id(form)!
+    await db().begin(async (tx) => {
+      const result = await tx`DELETE FROM subjects WHERE id=${subjectId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Matière introuvable.')
+      await logActivity(tx, schoolId, user.id, 'grade', 'Matière supprimée', `subject_id=${subjectId}`)
+    })
     return 'Matière supprimée.'
   })
 }
@@ -187,21 +218,32 @@ export async function saveAssignment(form: FormData): Promise<ActionResult> {
     const teacherId = id(form, 'teacherId')!
     const classId = id(form, 'classId')!
     const subjectId = id(form, 'subjectId')!
-    const sql = db()
-    await Promise.all([assertTeacher(sql, teacherId, schoolId), assertClass(sql, classId, schoolId), assertSubject(sql, subjectId, schoolId)])
-    if (assignmentId) {
-      const result = await sql`UPDATE teacher_assignments SET teacher_id=${teacherId}, class_id=${classId}, subject_id=${subjectId} WHERE id=${assignmentId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Affectation introuvable.')
-    } else await sql`INSERT INTO teacher_assignments (school_id, teacher_id, class_id, subject_id) VALUES (${schoolId}, ${teacherId}, ${classId}, ${subjectId})`
-    await logActivity(sql, schoolId, user.id, 'teacher', 'Affectation enregistrée')
+    await db().begin(async (tx) => {
+      await assertTeacher(tx, teacherId, schoolId)
+      await assertClass(tx, classId, schoolId)
+      await assertSubject(tx, subjectId, schoolId)
+      let savedAssignmentId = assignmentId
+      if (assignmentId) {
+        const result = await tx`UPDATE teacher_assignments SET teacher_id=${teacherId}, class_id=${classId}, subject_id=${subjectId} WHERE id=${assignmentId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Affectation introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO teacher_assignments (school_id, teacher_id, class_id, subject_id) VALUES (${schoolId}, ${teacherId}, ${classId}, ${subjectId}) RETURNING id`
+        savedAssignmentId = rows[0].id
+      }
+      await logActivity(tx, schoolId, user.id, 'teacher', 'Affectation enregistrée', `assignment_id=${savedAssignmentId}`)
+    })
     return 'Affectation enregistrée.'
   })
 }
 
 export async function deleteAssignment(form: FormData): Promise<ActionResult> {
-  return perform('teachers:write', async (_user, schoolId) => {
-    const result = await db()`DELETE FROM teacher_assignments WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Affectation introuvable.')
+  return perform('teachers:write', async (user, schoolId) => {
+    const assignmentId = id(form)!
+    await db().begin(async (tx) => {
+      const result = await tx`DELETE FROM teacher_assignments WHERE id=${assignmentId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Affectation introuvable.')
+      await logActivity(tx, schoolId, user.id, 'teacher', 'Affectation supprimée', `assignment_id=${assignmentId}`)
+    })
     return 'Affectation supprimée.'
   })
 }
@@ -215,41 +257,50 @@ export async function saveGrade(form: FormData): Promise<ActionResult> {
     const score = number(form, 'score', 0, 1000)
     const maxScore = number(form, 'maxScore', 0.01, 1000)
     if (score > maxScore) throw new Error('La note ne peut pas dépasser le barème.')
-    const sql = db()
-    const student = await assertStudent(sql, studentId, schoolId)
-    await Promise.all([assertSubject(sql, subjectId, schoolId), assertTeacher(sql, teacherId, schoolId)])
-    if (gradeId && user.role === 'teacher') {
-      const existing = await sql`SELECT s.class_id, g.subject_id FROM grades g JOIN students s ON s.id=g.student_id WHERE g.id=${gradeId} AND g.school_id=${schoolId}`
-      if (!existing.length) throw new Error('Note introuvable.')
-      await assertTeacherScope(user, schoolId, existing[0].class_id, existing[0].subject_id)
-    }
-    if (user.role === 'teacher') {
-      const own = await sql`SELECT id FROM teachers WHERE user_id=${user.id} AND school_id=${schoolId} AND status='active'`
-      if (!own.length) throw new Error('Aucune fiche enseignant n’est liée à ce compte.')
-      teacherId = own[0].id
-    }
-    await assertTeacherScope(user, schoolId, student.class_id, subjectId)
     const term = text(form, 'term', 1, 50)
     const assessment = text(form, 'assessment', 1, 120)
-    if (gradeId) {
-      const result = await sql`UPDATE grades SET student_id=${studentId}, subject_id=${subjectId}, teacher_id=${teacherId}, term=${term}, assessment=${assessment}, score=${score}, max_score=${maxScore}, appreciation=${optionalText(form, 'appreciation', 1000)}, graded_at=${date(form, 'gradedAt')}, updated_at=now() WHERE id=${gradeId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Note introuvable.')
-    } else await sql`INSERT INTO grades (school_id, student_id, subject_id, teacher_id, term, assessment, score, max_score, appreciation, graded_at) VALUES (${schoolId}, ${studentId}, ${subjectId}, ${teacherId}, ${term}, ${assessment}, ${score}, ${maxScore}, ${optionalText(form, 'appreciation', 1000)}, ${date(form, 'gradedAt')})`
-    await logActivity(sql, schoolId, user.id, 'grade', gradeId ? 'Note modifiée' : 'Note ajoutée', `${studentId} · ${assessment}`)
+    await db().begin(async (tx) => {
+      const student = await assertStudent(tx, studentId, schoolId)
+      await assertSubject(tx, subjectId, schoolId)
+      await assertTeacher(tx, teacherId, schoolId)
+      if (gradeId && user.role === 'teacher') {
+        const existing = await tx`SELECT s.class_id, g.subject_id FROM grades g JOIN students s ON s.id=g.student_id WHERE g.id=${gradeId} AND g.school_id=${schoolId} FOR UPDATE OF g, s`
+        if (!existing.length) throw new Error('Note introuvable.')
+        await assertTeacherScope(user, schoolId, existing[0].class_id, existing[0].subject_id, tx)
+      }
+      if (user.role === 'teacher') {
+        const own = await tx`SELECT id FROM teachers WHERE user_id=${user.id} AND school_id=${schoolId} AND status='active' FOR SHARE`
+        if (!own.length) throw new Error('Aucune fiche enseignant n’est liée à ce compte.')
+        teacherId = own[0].id
+      }
+      await assertTeacherScope(user, schoolId, student.class_id, subjectId, tx)
+      let savedGradeId = gradeId
+      if (gradeId) {
+        const result = await tx`UPDATE grades SET student_id=${studentId}, subject_id=${subjectId}, teacher_id=${teacherId}, term=${term}, assessment=${assessment}, score=${score}, max_score=${maxScore}, appreciation=${optionalText(form, 'appreciation', 1000)}, graded_at=${date(form, 'gradedAt')}, updated_at=now() WHERE id=${gradeId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Note introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO grades (school_id, student_id, subject_id, teacher_id, term, assessment, score, max_score, appreciation, graded_at) VALUES (${schoolId}, ${studentId}, ${subjectId}, ${teacherId}, ${term}, ${assessment}, ${score}, ${maxScore}, ${optionalText(form, 'appreciation', 1000)}, ${date(form, 'gradedAt')}) RETURNING id`
+        savedGradeId = rows[0].id
+      }
+      await logActivity(tx, schoolId, user.id, 'grade', gradeId ? 'Note modifiée' : 'Note ajoutée', `grade_id=${savedGradeId};term=${term}`)
+    })
     return gradeId ? 'Note mise à jour ; bulletins recalculés.' : 'Note enregistrée ; bulletins recalculés.'
   })
 }
 
 export async function deleteGrade(form: FormData): Promise<ActionResult> {
   return perform('grades:write', async (user, schoolId) => {
-    const sql = db()
-    if (user.role === 'teacher') {
-      const rows = await sql`SELECT g.id, s.class_id, g.subject_id FROM grades g JOIN students s ON s.id=g.student_id WHERE g.id=${id(form)!} AND g.school_id=${schoolId}`
-      if (!rows.length) throw new Error('Note introuvable.')
-      await assertTeacherScope(user, schoolId, rows[0].class_id, rows[0].subject_id)
-    }
-    const result = await sql`DELETE FROM grades WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Note introuvable.')
+    const gradeId = id(form)!
+    await db().begin(async (tx) => {
+      if (user.role === 'teacher') {
+        const rows = await tx`SELECT g.id, s.class_id, g.subject_id FROM grades g JOIN students s ON s.id=g.student_id WHERE g.id=${gradeId} AND g.school_id=${schoolId} FOR UPDATE OF g, s`
+        if (!rows.length) throw new Error('Note introuvable.')
+        await assertTeacherScope(user, schoolId, rows[0].class_id, rows[0].subject_id, tx)
+      }
+      const result = await tx`DELETE FROM grades WHERE id=${gradeId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Note introuvable.')
+      await logActivity(tx, schoolId, user.id, 'grade', 'Note supprimée', `grade_id=${gradeId}`)
+    })
     return 'Note supprimée ; bulletins recalculés.'
   })
 }
@@ -288,13 +339,15 @@ export async function saveAttendance(form: FormData): Promise<ActionResult> {
         }
       }
 
+      let savedAttendanceId = existing?.id
       if (existing) {
         const result = await tx`UPDATE attendance SET class_id=${currentClassId}, attendance_date=${attendanceDate}, status=${status}, notes=${optionalText(form, 'notes', 500)}, recorded_by=${user.id}, updated_at=now() WHERE id=${existing.id} AND school_id=${schoolId}`
         if (!result.count) throw new Error('Présence introuvable.')
       } else {
-        await tx`INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status, notes, recorded_by) VALUES (${schoolId}, ${studentId}, ${currentClassId}, ${attendanceDate}, ${status}, ${optionalText(form, 'notes', 500)}, ${user.id})`
+        const rows = await tx`INSERT INTO attendance (school_id, student_id, class_id, attendance_date, status, notes, recorded_by) VALUES (${schoolId}, ${studentId}, ${currentClassId}, ${attendanceDate}, ${status}, ${optionalText(form, 'notes', 500)}, ${user.id}) RETURNING id`
+        savedAttendanceId = rows[0].id
       }
-      await logActivity(tx, schoolId, user.id, 'absence', 'Appel de présence enregistré', `${studentId} · ${attendanceDate}`)
+      await logActivity(tx, schoolId, user.id, 'absence', 'Appel de présence enregistré', `attendance_id=${savedAttendanceId};date=${attendanceDate}`)
     })
     return 'Présence enregistrée.'
   })
@@ -302,14 +355,17 @@ export async function saveAttendance(form: FormData): Promise<ActionResult> {
 
 export async function deleteAttendance(form: FormData): Promise<ActionResult> {
   return perform('attendance:write', async (user, schoolId) => {
-    const sql = db()
-    if (user.role === 'teacher') {
-      const rows = await sql`SELECT class_id FROM attendance WHERE id=${id(form)!} AND school_id=${schoolId}`
-      if (!rows.length) throw new Error('Présence introuvable.')
-      await assertTeacherScope(user, schoolId, rows[0].class_id)
-    }
-    const result = await sql`DELETE FROM attendance WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Présence introuvable.')
+    const attendanceId = id(form)!
+    await db().begin(async (tx) => {
+      if (user.role === 'teacher') {
+        const rows = await tx`SELECT class_id FROM attendance WHERE id=${attendanceId} AND school_id=${schoolId} FOR UPDATE`
+        if (!rows.length) throw new Error('Présence introuvable.')
+        await assertTeacherScope(user, schoolId, rows[0].class_id, undefined, tx)
+      }
+      const result = await tx`DELETE FROM attendance WHERE id=${attendanceId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Présence introuvable.')
+      await logActivity(tx, schoolId, user.id, 'absence', 'Enregistrement de présence supprimé', `attendance_id=${attendanceId}`)
+    })
     return 'Enregistrement de présence supprimé.'
   })
 }
@@ -324,21 +380,32 @@ export async function saveSchedule(form: FormData): Promise<ActionResult> {
     const startsAt = time(form, 'startsAt')
     const endsAt = time(form, 'endsAt')
     if (endsAt <= startsAt) throw new Error('L’heure de fin doit suivre l’heure de début.')
-    const sql = db()
-    await Promise.all([assertClass(sql, classId, schoolId), assertTeacher(sql, teacherId, schoolId), assertSubject(sql, subjectId, schoolId)])
-    if (scheduleId) {
-      const result = await sql`UPDATE schedules SET class_id=${classId}, teacher_id=${teacherId}, subject_id=${subjectId}, weekday=${weekday}, starts_at=${startsAt}, ends_at=${endsAt}, room=${optionalText(form, 'room', 80)}, updated_at=now() WHERE id=${scheduleId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Cours introuvable.')
-    } else await sql`INSERT INTO schedules (school_id, class_id, teacher_id, subject_id, weekday, starts_at, ends_at, room) VALUES (${schoolId}, ${classId}, ${teacherId}, ${subjectId}, ${weekday}, ${startsAt}, ${endsAt}, ${optionalText(form, 'room', 80)})`
-    await logActivity(sql, schoolId, user.id, 'schedule', scheduleId ? 'Emploi du temps modifié' : 'Cours ajouté')
+    await db().begin(async (tx) => {
+      await assertClass(tx, classId, schoolId)
+      await assertTeacher(tx, teacherId, schoolId)
+      await assertSubject(tx, subjectId, schoolId)
+      let savedScheduleId = scheduleId
+      if (scheduleId) {
+        const result = await tx`UPDATE schedules SET class_id=${classId}, teacher_id=${teacherId}, subject_id=${subjectId}, weekday=${weekday}, starts_at=${startsAt}, ends_at=${endsAt}, room=${optionalText(form, 'room', 80)}, updated_at=now() WHERE id=${scheduleId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Cours introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO schedules (school_id, class_id, teacher_id, subject_id, weekday, starts_at, ends_at, room) VALUES (${schoolId}, ${classId}, ${teacherId}, ${subjectId}, ${weekday}, ${startsAt}, ${endsAt}, ${optionalText(form, 'room', 80)}) RETURNING id`
+        savedScheduleId = rows[0].id
+      }
+      await logActivity(tx, schoolId, user.id, 'schedule', scheduleId ? 'Emploi du temps modifié' : 'Cours ajouté', `schedule_id=${savedScheduleId}`)
+    })
     return 'Emploi du temps enregistré.'
   })
 }
 
 export async function deleteSchedule(form: FormData): Promise<ActionResult> {
-  return perform('schedules:write', async (_user, schoolId) => {
-    const result = await db()`DELETE FROM schedules WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Cours introuvable.')
+  return perform('schedules:write', async (user, schoolId) => {
+    const scheduleId = id(form)!
+    await db().begin(async (tx) => {
+      const result = await tx`DELETE FROM schedules WHERE id=${scheduleId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Cours introuvable.')
+      await logActivity(tx, schoolId, user.id, 'schedule', 'Cours supprimé', `schedule_id=${scheduleId}`)
+    })
     return 'Cours supprimé.'
   })
 }
@@ -350,20 +417,29 @@ export async function saveCommunication(form: FormData): Promise<ActionResult> {
     const body = text(form, 'body', 2, 5000)
     const audience = text(form, 'audience', 1, 120)
     const status = choice(form, 'status', ['draft', 'published'] as const)
-    const sql = db()
-    if (communicationId) {
-      const result = await sql`UPDATE communications SET title=${title}, body=${body}, audience=${audience}, status=${status}, published_at=${status === 'published' ? new Date().toISOString() : null}, updated_at=now() WHERE id=${communicationId} AND school_id=${schoolId}`
-      if (!result.count) throw new Error('Communication introuvable.')
-    } else await sql`INSERT INTO communications (school_id, author_id, title, body, audience, status, published_at) VALUES (${schoolId}, ${user.id}, ${title}, ${body}, ${audience}, ${status}, ${status === 'published' ? new Date().toISOString() : null})`
-    await logActivity(sql, schoolId, user.id, 'message', status === 'published' ? 'Annonce publiée' : 'Brouillon enregistré', title)
+    await db().begin(async (tx) => {
+      let savedCommunicationId = communicationId
+      if (communicationId) {
+        const result = await tx`UPDATE communications SET title=${title}, body=${body}, audience=${audience}, status=${status}, published_at=${status === 'published' ? new Date().toISOString() : null}, updated_at=now() WHERE id=${communicationId} AND school_id=${schoolId}`
+        if (!result.count) throw new Error('Communication introuvable.')
+      } else {
+        const rows = await tx`INSERT INTO communications (school_id, author_id, title, body, audience, status, published_at) VALUES (${schoolId}, ${user.id}, ${title}, ${body}, ${audience}, ${status}, ${status === 'published' ? new Date().toISOString() : null}) RETURNING id`
+        savedCommunicationId = rows[0].id
+      }
+      await logActivity(tx, schoolId, user.id, 'message', status === 'published' ? 'Annonce publiée' : 'Brouillon enregistré', `communication_id=${savedCommunicationId};status=${status}`)
+    })
     return status === 'published' ? 'Annonce enregistrée et publiée dans l’espace scolaire.' : 'Brouillon enregistré.'
   })
 }
 
 export async function deleteCommunication(form: FormData): Promise<ActionResult> {
-  return perform('communications:write', async (_user, schoolId) => {
-    const result = await db()`DELETE FROM communications WHERE id=${id(form)!} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Communication introuvable.')
+  return perform('communications:write', async (user, schoolId) => {
+    const communicationId = id(form)!
+    await db().begin(async (tx) => {
+      const result = await tx`DELETE FROM communications WHERE id=${communicationId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Communication introuvable.')
+      await logActivity(tx, schoolId, user.id, 'message', 'Communication supprimée', `communication_id=${communicationId}`)
+    })
     return 'Communication supprimée.'
   })
 }
@@ -417,6 +493,7 @@ export async function deleteSchool(form: FormData): Promise<ActionResult> {
       if (!matchesSchoolDeletionConfirmation(confirmation, rows[0].name)) {
         throw new Error(`Saisissez « SUPPRIMER ${rows[0].name} » pour confirmer.`)
       }
+      await logPlatformActivity(sql, user.id, 'school.deleted', schoolId, rows[0].name)
       const result = await sql`DELETE FROM schools WHERE id=${schoolId} RETURNING id`
       if (!result.length) throw new Error('Établissement introuvable.')
     })
@@ -431,7 +508,7 @@ export async function deleteSchool(form: FormData): Promise<ActionResult> {
 
 export async function createSchool(form: FormData): Promise<ActionResult> {
   try {
-    await requirePlatformAdmin('school:create')
+    const user = await requirePlatformAdmin('school:create')
     const name = text(form, 'name', 2, 160)
     const city = text(form, 'city', 1, 120)
     const country = text(form, 'country', 1, 120)
@@ -442,6 +519,7 @@ export async function createSchool(form: FormData): Promise<ActionResult> {
     await db().begin(async (sql) => {
       const rows = await sql`INSERT INTO schools (name, city, country, address, phone, email) VALUES (${name}, ${city}, ${country}, ${address}, ${phone}, ${schoolEmail}) RETURNING id`
       await sql`INSERT INTO school_settings (school_id, academic_year, current_term) VALUES (${rows[0].id}, ${academicYear}, 'Trimestre 1')`
+      await logPlatformActivity(sql, user.id, 'school.created', rows[0].id, name)
     })
     revalidatePath('/')
     revalidatePath('/plateforme')
@@ -461,7 +539,7 @@ function teacherProfileLinkMessage(reason: string) {
 }
 
 export async function saveUser(form: FormData): Promise<ActionResult> {
-  return perform('users:write', async (_user, schoolId) => {
+  return perform('users:write', async (user, schoolId) => {
     const userId = id(form, 'id', false)
     const fullName = text(form, 'fullName', 2, 160)
     const userEmail = email(form)
@@ -476,6 +554,18 @@ export async function saveUser(form: FormData): Promise<ActionResult> {
     const sql = db()
 
     await sql.begin(async (tx) => {
+      const schools = await tx`SELECT id FROM schools WHERE id=${schoolId} FOR UPDATE`
+      if (!schools.length) throw new Error('Établissement introuvable.')
+
+      const existingUsers = userId
+        ? await tx`SELECT id, role, active FROM users WHERE id=${userId} AND school_id=${schoolId} FOR UPDATE`
+        : []
+      if (userId && !existingUsers.length) throw new Error('Compte introuvable.')
+      if (existingUsers.length) {
+        const counts = await tx`SELECT COUNT(*)::int AS count FROM users WHERE school_id=${schoolId} AND role='director' AND active=true`
+        assertActiveDirectorRemains(existingUsers[0], { role, active }, counts[0].count)
+      }
+
       let teacherProfileId: string | null = null
       if (role === 'teacher' && active) {
         const linkedProfiles = userId
@@ -493,6 +583,7 @@ export async function saveUser(form: FormData): Promise<ActionResult> {
           ? await tx`UPDATE users SET full_name=${fullName}, email=${userEmail}, role=${role}, password_hash=${passwordHash}, active=${active}, updated_at=now() WHERE id=${userId} AND school_id=${schoolId}`
           : await tx`UPDATE users SET full_name=${fullName}, email=${userEmail}, role=${role}, active=${active}, updated_at=now() WHERE id=${userId} AND school_id=${schoolId}`
         if (!result.count) throw new Error('Compte introuvable.')
+        if (passwordHash) await tx`DELETE FROM sessions WHERE user_id=${userId}`
       } else {
         const rows = await tx`INSERT INTO users (school_id, email, full_name, password_hash, role) VALUES (${schoolId}, ${userEmail}, ${fullName}, ${passwordHash}, ${role}) RETURNING id`
         targetUserId = rows[0].id
@@ -502,6 +593,15 @@ export async function saveUser(form: FormData): Promise<ActionResult> {
         const linked = await tx`UPDATE teachers SET user_id=${targetUserId}, updated_at=now() WHERE id=${teacherProfileId} AND school_id=${schoolId} AND status='active' AND user_id IS NULL RETURNING id`
         if (!linked.length) throw new Error('La fiche enseignant vient d’être associée à un autre compte. Réessayez.')
       }
+
+      await logActivity(
+        tx,
+        schoolId,
+        user.id,
+        'user',
+        userId ? 'Compte utilisateur modifié' : 'Compte utilisateur créé',
+        `user_id=${targetUserId};role=${role};active=${active};password_changed=${Boolean(passwordHash)}`,
+      )
     })
 
     return userId ? 'Compte et permissions mis à jour.' : 'Compte utilisateur créé.'
@@ -512,8 +612,17 @@ export async function deleteUser(form: FormData): Promise<ActionResult> {
   return perform('users:write', async (user, schoolId) => {
     const userId = id(form)!
     if (userId === user.id) throw new Error('Vous ne pouvez pas supprimer votre propre compte.')
-    const result = await db()`DELETE FROM users WHERE id=${userId} AND school_id=${schoolId}`
-    if (!result.count) throw new Error('Compte introuvable.')
+    await db().begin(async (tx) => {
+      const schools = await tx`SELECT id FROM schools WHERE id=${schoolId} FOR UPDATE`
+      if (!schools.length) throw new Error('Établissement introuvable.')
+      const targets = await tx`SELECT id, role, active FROM users WHERE id=${userId} AND school_id=${schoolId} FOR UPDATE`
+      if (!targets.length) throw new Error('Compte introuvable.')
+      const counts = await tx`SELECT COUNT(*)::int AS count FROM users WHERE school_id=${schoolId} AND role='director' AND active=true`
+      assertActiveDirectorRemains(targets[0], null, counts[0].count)
+      const result = await tx`DELETE FROM users WHERE id=${userId} AND school_id=${schoolId}`
+      if (!result.count) throw new Error('Compte introuvable.')
+      await logActivity(tx, schoolId, user.id, 'user', 'Compte utilisateur supprimé', `user_id=${userId};role=${targets[0].role}`)
+    })
     return 'Compte utilisateur supprimé.'
   })
 }
