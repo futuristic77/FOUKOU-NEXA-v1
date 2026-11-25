@@ -18,6 +18,7 @@ import type { ViewKey } from './types'
 const navigation: { key: ViewKey; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
   { key: 'students', label: 'Élèves et classes', icon: UsersRound },
+  { key: 'academic-years', label: 'Années et inscriptions', icon: GraduationCap },
   { key: 'teachers', label: 'Enseignants', icon: UserRound },
   { key: 'grades', label: 'Notes et bulletins', icon: BookOpenCheck },
   { key: 'schedule', label: 'Présences et emplois du temps', icon: CalendarDays },

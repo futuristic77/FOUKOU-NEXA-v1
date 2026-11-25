@@ -8,6 +8,7 @@ import { actionErrorMessage } from '@/lib/action-errors.mjs'
 import { updateSchoolProfile, updateSchoolSettings } from '@/lib/school-admin-data.mjs'
 import { requirePlatformAdmin, requireSchool, requireUser } from '@/lib/auth'
 import { canDeleteSchool, matchesSchoolDeletionConfirmation } from '@/lib/permissions.mjs'
+import { assertValidSchoolYearDates, isSchoolYearEditable } from '@/lib/academic-year-domain.mjs'
 import { hasAttendanceClassAccess, hasTeacherAssignment, resolveTeacherProfileLink } from '@/lib/teacher-scope.mjs'
 import { hashPassword, validatePassword } from '@/lib/password.mjs'
 import { choice, date, email, id, integer, number, optionalEmail, optionalText, text, time } from '@/lib/validation'
@@ -459,6 +460,164 @@ export async function saveSettings(form: FormData): Promise<ActionResult> {
       await logActivity(tx, schoolId, user.id, 'settings', 'Paramètres scolaires modifiés', academicYear)
     })
     return 'Paramètres scolaires enregistrés.'
+  })
+}
+
+export async function createAcademicYear(form: FormData): Promise<ActionResult> {
+  return perform('settings:write', async (user, schoolId) => {
+    const label = text(form, 'label', 2, 100)
+    const startDate = date(form, 'startDate')!
+    const endDate = date(form, 'endDate')!
+    assertValidSchoolYearDates(startDate, endDate)
+
+    await db().begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${schoolId}, 0))`
+      const duplicate = await tx`
+        SELECT id FROM school_years
+        WHERE school_id = ${schoolId} AND lower(btrim(label)) = lower(btrim(${label}))
+        LIMIT 1
+      `
+      if (duplicate.length) throw new Error('Une année scolaire porte déjà ce libellé dans cet établissement.')
+      await tx`
+        INSERT INTO school_years (school_id, label, start_date, end_date, status, created_by)
+        VALUES (${schoolId}, ${label}, ${startDate}, ${endDate}, 'prepared', ${user.id})
+      `
+      await logActivity(tx, schoolId, user.id, 'academic-year', 'Année scolaire préparée', label)
+    })
+    return 'Année scolaire créée à l’état préparé.'
+  })
+}
+
+export async function activateSchoolYear(form: FormData): Promise<ActionResult> {
+  return perform('settings:write', async (user, schoolId) => {
+    const schoolYearId = id(form, 'id')!
+    await db().begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${schoolId}, 0))`
+      const targetRows = await tx`
+        SELECT id, label, status, to_char(start_date, 'YYYY-MM-DD') AS start_date,
+          to_char(end_date, 'YYYY-MM-DD') AS end_date
+        FROM school_years
+        WHERE id = ${schoolYearId} AND school_id = ${schoolId}
+        FOR UPDATE
+      `
+      if (!targetRows.length) throw new Error('Année scolaire introuvable dans cet établissement.')
+      const target = targetRows[0]
+      if (target.status === 'closed' || !isSchoolYearEditable(target.status)) {
+        throw new Error('Une année clôturée ne peut pas être réactivée.')
+      }
+      if (target.status === 'active') throw new Error('Cette année scolaire est déjà active.')
+
+      await tx`
+        UPDATE school_years SET status = 'closed', updated_at = now()
+        WHERE school_id = ${schoolId} AND status = 'active' AND id <> ${schoolYearId}
+      `
+      await tx`
+        UPDATE school_years SET status = 'active', updated_at = now()
+        WHERE id = ${schoolYearId} AND school_id = ${schoolId}
+      `
+      await logActivity(tx, schoolId, user.id, 'academic-year', 'Année scolaire activée', target.label)
+    })
+    return 'Année activée. L’année précédemment active a été clôturée.'
+  })
+}
+
+export async function closeSchoolYear(form: FormData): Promise<ActionResult> {
+  return perform('settings:write', async (user, schoolId) => {
+    const schoolYearId = id(form, 'id')!
+    await db().begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${schoolId}, 0))`
+      const targetRows = await tx`
+        SELECT id, label, status FROM school_years
+        WHERE id = ${schoolYearId} AND school_id = ${schoolId}
+        FOR UPDATE
+      `
+      if (!targetRows.length) throw new Error('Année scolaire introuvable dans cet établissement.')
+      if (targetRows[0].status === 'closed') throw new Error('Cette année scolaire est déjà clôturée.')
+      await tx`
+        UPDATE school_years SET status = 'closed', updated_at = now()
+        WHERE id = ${schoolYearId} AND school_id = ${schoolId}
+      `
+      await logActivity(tx, schoolId, user.id, 'academic-year', 'Année scolaire clôturée', targetRows[0].label)
+    })
+    return 'Année clôturée et conservée en lecture seule.'
+  })
+}
+
+export async function createStudentEnrollment(form: FormData): Promise<ActionResult> {
+  return perform('students:write', async (user, schoolId) => {
+    const schoolYearId = id(form, 'schoolYearId')!
+    const studentId = id(form, 'studentId')!
+    const classId = id(form, 'classId')!
+    const enrolledAt = date(form, 'enrolledAt')!
+
+    await db().begin(async (tx) => {
+      const yearRows = await tx`
+        SELECT id, label, status FROM school_years
+        WHERE id = ${schoolYearId} AND school_id = ${schoolId}
+        FOR SHARE
+      `
+      if (!yearRows.length) throw new Error('Année scolaire introuvable dans cet établissement.')
+      if (!isSchoolYearEditable(yearRows[0].status)) throw new Error('Les inscriptions d’une année clôturée sont en lecture seule.')
+      await assertStudent(tx, studentId, schoolId)
+      await assertClass(tx, classId, schoolId)
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`${schoolId}:${schoolYearId}:${studentId}`}, 0))`
+      const existing = await tx`
+        SELECT id FROM student_enrollments
+        WHERE school_id = ${schoolId} AND school_year_id = ${schoolYearId} AND student_id = ${studentId}
+        FOR UPDATE
+      `
+      if (existing.length) throw new Error('Cet élève possède déjà une inscription pour cette année.')
+
+      const rows = await tx`
+        INSERT INTO student_enrollments (school_id, school_year_id, student_id, class_id, status, enrolled_at, created_by)
+        VALUES (${schoolId}, ${schoolYearId}, ${studentId}, ${classId}, 'enrolled', ${enrolledAt}, ${user.id})
+        RETURNING id
+      `
+      await tx`
+        INSERT INTO student_enrollment_class_changes
+          (school_id, enrollment_id, class_before_id, class_after_id, effective_on, changed_by)
+        VALUES (${schoolId}, ${rows[0].id}, NULL, ${classId}, ${enrolledAt}, ${user.id})
+      `
+      await logActivity(tx, schoolId, user.id, 'enrollment', 'Élève inscrit pour une année scolaire', `student_id=${studentId};school_year_id=${schoolYearId}`)
+    })
+    return 'Inscription enregistrée pour cette année scolaire.'
+  })
+}
+
+export async function updateStudentEnrollment(form: FormData): Promise<ActionResult> {
+  return perform('students:write', async (user, schoolId) => {
+    const enrollmentId = id(form, 'id')!
+    const classId = id(form, 'classId')!
+    const status = choice(form, 'status', ['enrolled', 'withdrawn', 'transferred', 'completed'] as const)
+    const effectiveOn = date(form, 'effectiveOn')!
+
+    await db().begin(async (tx) => {
+      const enrollmentRows = await tx`
+        SELECT e.student_id, e.school_year_id, e.class_id, e.status, sy.status AS year_status
+        FROM student_enrollments e
+        JOIN school_years sy ON sy.id = e.school_year_id AND sy.school_id = e.school_id
+        WHERE e.id = ${enrollmentId} AND e.school_id = ${schoolId}
+        FOR UPDATE OF e, sy
+      `
+      if (!enrollmentRows.length) throw new Error('Inscription introuvable dans cet établissement.')
+      const enrollment = enrollmentRows[0]
+      if (!isSchoolYearEditable(enrollment.year_status)) throw new Error('Les inscriptions d’une année clôturée sont en lecture seule.')
+      await assertClass(tx, classId, schoolId)
+      await tx`
+        UPDATE student_enrollments
+        SET class_id = ${classId}, status = ${status}, updated_at = now()
+        WHERE id = ${enrollmentId} AND school_id = ${schoolId}
+      `
+      if (enrollment.class_id !== classId) {
+        await tx`
+          INSERT INTO student_enrollment_class_changes
+            (school_id, enrollment_id, class_before_id, class_after_id, effective_on, changed_by)
+          VALUES (${schoolId}, ${enrollmentId}, ${enrollment.class_id}, ${classId}, ${effectiveOn}, ${user.id})
+        `
+      }
+      await logActivity(tx, schoolId, user.id, 'enrollment', 'Inscription ou classe mise à jour', `student_id=${enrollment.student_id};school_year_id=${enrollment.school_year_id}`)
+    })
+    return 'Inscription mise à jour ; l’historique de classe est conservé.'
   })
 }
 

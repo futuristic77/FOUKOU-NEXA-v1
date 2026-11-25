@@ -1,2 +1,2 @@
-export type { ActionResult, Activity, Assignment, Attendance, Classroom, Communication, Grade, ReportCard, Role, Schedule, School, SchoolData, SchoolSettings, SessionUser, Student, Subject, Teacher, UserAccount } from '@/lib/types'
-export type ViewKey = 'dashboard' | 'students' | 'teachers' | 'grades' | 'schedule' | 'communication' | 'settings'
+export type { ActionResult, Activity, Assignment, Attendance, Classroom, Communication, EnrollmentClassChange, EnrollmentStatus, Grade, ReportCard, Role, Schedule, School, SchoolData, SchoolSettings, SchoolYear, SchoolYearStatus, SessionUser, Student, StudentEnrollment, Subject, Teacher, UserAccount } from '@/lib/types'
+export type ViewKey = 'dashboard' | 'students' | 'academic-years' | 'teachers' | 'grades' | 'schedule' | 'communication' | 'settings'

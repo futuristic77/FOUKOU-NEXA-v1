@@ -10,13 +10,14 @@ import type { SchoolData, ViewKey } from './types'
 import { Sidebar } from './sidebar'
 import { DashboardView } from './dashboard-view'
 import { ManagementView } from './management-view'
+import { AcademicYearsView } from './academic-years-view'
 import { TeachersView } from './teachers-view'
 import { GradesView } from './grades-view'
 import { ScheduleView } from './schedule-view'
 import { CommunicationView } from './communication-view'
 import { SettingsView } from './settings-view'
 
-const viewLabels: Record<ViewKey, string> = { dashboard: 'Tableau de bord', students: 'Élèves et classes', teachers: 'Enseignants', grades: 'Notes et bulletins', schedule: 'Présences et emplois du temps', communication: 'Communication', settings: 'Paramètres' }
+const viewLabels: Record<ViewKey, string> = { dashboard: 'Tableau de bord', students: 'Élèves et classes', 'academic-years': 'Années et inscriptions', teachers: 'Enseignants', grades: 'Notes et bulletins', schedule: 'Présences et emplois du temps', communication: 'Communication', settings: 'Paramètres' }
 
 export function FoukouApp({ data }: { data: SchoolData }) {
   const [activeView, setActiveView] = useState<ViewKey>('dashboard')
@@ -41,6 +42,7 @@ export function FoukouApp({ data }: { data: SchoolData }) {
   let view: ReactNode
   switch (activeView) {
     case 'students': view = <ManagementView data={data} />; break
+    case 'academic-years': view = <AcademicYearsView data={data} />; break
     case 'teachers': view = <TeachersView data={data} onNavigate={navigate} />; break
     case 'grades': view = <GradesView data={data} />; break
     case 'schedule': view = <ScheduleView data={data} />; break

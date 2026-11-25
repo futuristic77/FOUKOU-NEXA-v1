@@ -1524,6 +1524,260 @@ textarea:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.academic-years-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.academic-years-header {
+  align-items: flex-start;
+}
+
+.academic-year-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.academic-year-picker select {
+  max-width: min(320px, 100%);
+  min-height: 38px;
+  padding: 0 10px;
+  color: var(--foreground);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.academic-year-list,
+.enrollment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.academic-year-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+}
+
+.academic-year-item.is-selected {
+  border-color: var(--primary);
+}
+
+.academic-year-choice {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 3px;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font-size: 11px;
+}
+
+.academic-year-choice-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.academic-year-choice strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.academic-year-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.academic-year-status.status-active {
+  color: var(--positive);
+  background: var(--positive-bg);
+}
+
+.academic-year-status.status-prepared {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.academic-year-status.status-closed {
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+
+.academic-year-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.academic-year-actions form {
+  display: flex;
+}
+
+.academic-year-note {
+  margin: 0;
+  padding: 11px 12px;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.academic-year-form,
+.enrollment-form {
+  margin: 0;
+}
+
+.academic-history-picker {
+  max-width: 380px;
+}
+
+.enrollment-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.enrollment-row-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.enrollment-row-main > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.enrollment-row-main strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.enrollment-row-main span {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.enrollment-class-name {
+  color: var(--foreground) !important;
+  font-weight: 600;
+}
+
+.enrollment-editor {
+  flex: 0 0 auto;
+}
+
+.enrollment-editor .inline-form {
+  margin-top: 10px;
+}
+
+.academic-class-history {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.academic-class-history h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.academic-class-history h3 svg {
+  width: 15px;
+  height: 15px;
+}
+
+.academic-class-history ul {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.academic-class-history li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 9px 11px;
+  color: var(--muted-foreground);
+  background: var(--surface-raised);
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.academic-class-history li strong {
+  color: var(--foreground);
+}
+
+@media (max-width: 700px) {
+  .academic-years-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .academic-year-picker,
+  .academic-year-picker select,
+  .academic-history-picker {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .academic-year-item,
+  .enrollment-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .academic-year-actions {
+    justify-content: flex-start;
+  }
+}
+
 .management-toolbar {
   display: flex;
   flex-wrap: wrap;

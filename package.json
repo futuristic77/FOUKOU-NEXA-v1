@@ -9,7 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "pnpm test:unit",
-    "test:unit": "node --test tests/account-guards.test.mjs tests/action-audit-contract.test.mjs tests/database-target-guard.test.mjs tests/login-rate-limit-contract.test.mjs tests/migration-static.test.mjs tests/security.test.mjs tests/school-admin-contract.test.mjs tests/school-calculations.test.mjs tests/test-database-guard.test.mjs",
+    "test:unit": "node --test tests/account-guards.test.mjs tests/action-audit-contract.test.mjs tests/academic-years.test.mjs tests/database-target-guard.test.mjs tests/login-rate-limit-contract.test.mjs tests/migration-static.test.mjs tests/security.test.mjs tests/school-admin-contract.test.mjs tests/school-calculations.test.mjs tests/test-database-guard.test.mjs",
     "test:db": "node scripts/run-database-tests.mjs",
     "db:migrate": "node scripts/migrate.mjs --target=non-production",
     "db:migrate:production": "node scripts/migrate.mjs --target=production",

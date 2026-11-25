@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { loadSchoolRows } from '../lib/school-data-queries.mjs'
 import { updateSchoolProfile, updateSchoolSettings } from '../lib/school-admin-data.mjs'
+import { loadAcademicYearRows } from '../lib/academic-year-data.mjs'
 import { openTestDatabase, testDatabaseEnabled, assertRequiredMigration } from '../scripts/test-database-guard.mjs'
 
 const databaseTestsEnabled = testDatabaseEnabled()
@@ -236,6 +237,112 @@ test('les requêtes administratives restent limitées au school_id fourni', { sk
       name: 'Missing school', city: 'Ville', country: 'Pays', address: '', phone: '', email: '',
     }), /Établissement introuvable/)
     await assert.rejects(updateSchoolSettings(sql, randomUUID(), nextSettings), /Paramètres scolaires introuvables/)
+  } finally {
+    try {
+      const schoolIds = [schoolA, schoolB].filter(Boolean)
+      if (schoolIds.length) await sql`DELETE FROM schools WHERE id = ANY(${sql.array(schoolIds, 2950)})`
+    } finally {
+      await sql.end()
+    }
+  }
+})
+
+test('PostgreSQL garantit l’unicité, les dates et les liens tenant des années et inscriptions', { skip: !databaseTestsEnabled }, async () => {
+  const sql = await openTestDatabase()
+  const suffix = randomUUID()
+  let schoolA
+  let schoolB
+
+  try {
+    await assertRequiredMigration(sql, '006_academic_year_enrollments.sql')
+    const schools = await sql`
+      INSERT INTO schools (name)
+      VALUES (${`Year A ${suffix}`}), (${`Year B ${suffix}`})
+      RETURNING id
+    `
+    schoolA = schools[0].id
+    schoolB = schools[1].id
+
+    const classes = await sql`
+      INSERT INTO classes (school_id, name, level)
+      VALUES
+        (${schoolA}, ${`Year A class 1 ${suffix}`}, '6e'),
+        (${schoolA}, ${`Year A class 2 ${suffix}`}, '5e'),
+        (${schoolB}, ${`Year B class ${suffix}`}, '6e')
+      RETURNING id, school_id, name
+    `
+    const classA = classes[0].id
+    const classA2 = classes[1].id
+    const classB = classes[2].id
+    const students = await sql`
+      INSERT INTO students (school_id, class_id, student_number, full_name)
+      VALUES
+        (${schoolA}, ${classA}, ${`YA-${suffix}`}, 'Synthetic learner A'),
+        (${schoolB}, ${classB}, ${`YB-${suffix}`}, 'Synthetic learner B')
+      RETURNING id
+    `
+    const studentA = students[0].id
+    const studentB = students[1].id
+
+    const years = await sql`
+      INSERT INTO school_years (school_id, label, start_date, end_date, status)
+      VALUES
+        (${schoolA}, ${`Year A ${suffix}`}, '2026-08-01', '2027-06-30', 'active'),
+        (${schoolA}, ${`Prepared ${suffix}`}, '2027-08-01', '2028-06-30', 'prepared'),
+        (${schoolB}, ${`Year B ${suffix}`}, '2026-09-01', '2027-07-01', 'active')
+      RETURNING id
+    `
+    const yearA = years[0].id
+
+    await assert.rejects(
+      sql`INSERT INTO school_years (school_id, label, start_date, end_date, status) VALUES (${schoolA}, ${`Second active ${suffix}`}, '2027-08-01', '2028-06-30', 'active')`,
+      (error) => error.code === '23505',
+    )
+    await assert.rejects(
+      sql`INSERT INTO school_years (school_id, label, start_date, end_date) VALUES (${schoolA}, ${`Invalid dates ${suffix}`}, '2027-06-30', '2026-08-01')`,
+      (error) => error.code === '23514',
+    )
+
+    const enrollmentRows = await sql`
+      INSERT INTO student_enrollments (school_id, school_year_id, student_id, class_id, created_by)
+      VALUES (${schoolA}, ${yearA}, ${studentA}, ${classA}, null)
+      RETURNING id
+    `
+    const enrollmentId = enrollmentRows[0].id
+    await assert.rejects(
+      sql`INSERT INTO student_enrollments (school_id, school_year_id, student_id, class_id) VALUES (${schoolA}, ${yearA}, ${studentA}, ${classA})`,
+      (error) => error.code === '23505',
+    )
+    await assert.rejects(
+      sql`INSERT INTO student_enrollments (school_id, school_year_id, student_id, class_id) VALUES (${schoolA}, ${yearA}, ${studentB}, ${classA})`,
+      (error) => error.code === '23503',
+    )
+    await assert.rejects(
+      sql`INSERT INTO student_enrollments (school_id, school_year_id, student_id, class_id) VALUES (${schoolA}, ${yearA}, ${studentA}, ${classB})`,
+      (error) => error.code === '23503',
+    )
+
+    await sql`
+      INSERT INTO student_enrollment_class_changes
+        (school_id, enrollment_id, class_before_id, class_after_id, effective_on)
+      VALUES (${schoolA}, ${enrollmentId}, null, ${classA}, '2026-08-01')
+    `
+    await sql`UPDATE student_enrollments SET class_id = ${classA2} WHERE id = ${enrollmentId} AND school_id = ${schoolA}`
+    await sql`
+      INSERT INTO student_enrollment_class_changes
+        (school_id, enrollment_id, class_before_id, class_after_id, effective_on)
+      VALUES (${schoolA}, ${enrollmentId}, ${classA}, ${classA2}, '2026-10-01')
+    `
+    const yearsForSchoolA = await loadAcademicYearRows(sql, schoolA)
+    const yearsForSchoolB = await loadAcademicYearRows(sql, schoolB)
+    const history = yearsForSchoolA.enrollmentClassChanges.filter((change) => change.enrollment_id === enrollmentId)
+    assert.equal(yearsForSchoolA.schoolYears.length, 2)
+    assert.equal(yearsForSchoolA.studentEnrollments.length, 1)
+    assert.equal(yearsForSchoolB.schoolYears.length, 1)
+    assert.equal(yearsForSchoolB.studentEnrollments.length, 0)
+    assert.equal(history.length, 2)
+    assert.equal(history[0].class_after_name, classes[1].name)
+    assert.equal(history[1].class_before_name, classes[0].name)
   } finally {
     try {
       const schoolIds = [schoolA, schoolB].filter(Boolean)

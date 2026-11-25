@@ -13,11 +13,17 @@ export interface Attendance { id: string; studentId: string; studentName: string
 export interface Schedule { id: string; classId: string; className: string; teacherId: string | null; teacherName: string; subjectId: string; subjectName: string; weekday: number; startsAt: string; endsAt: string; room: string }
 export interface Communication { id: string; title: string; body: string; audience: string; status: 'draft' | 'published'; publishedAt: string | null; createdAt: string; authorName: string }
 export interface SchoolSettings { academicYear: string; currentTerm: string; periodType: 'trimester' | 'semester'; yearStart: string; yearEnd: string; passingAverage: number }
+export type SchoolYearStatus = 'prepared' | 'active' | 'closed'
+export interface SchoolYear { id: string; label: string; startDate: string; endDate: string; status: SchoolYearStatus }
+export type EnrollmentStatus = 'enrolled' | 'withdrawn' | 'transferred' | 'completed'
+export interface StudentEnrollment { id: string; studentId: string; studentName: string; schoolYearId: string; schoolYearLabel: string; classId: string; className: string; status: EnrollmentStatus; enrolledAt: string }
+export interface EnrollmentClassChange { id: string; enrollmentId: string; studentId: string; studentName: string; schoolYearId: string; schoolYearLabel: string; classBeforeName: string | null; classAfterName: string; effectiveOn: string }
 export interface Activity { id: string; kind: string; title: string; detail: string; createdAt: string }
 export interface UserAccount { id: string; fullName: string; email: string; role: Role; active: boolean }
 export interface ReportCard { studentId: string; studentName: string; className: string; term: string; rows: { subjectId: string; subject: string; coefficient: number; assessmentCount: number; average: number }[]; average: number | null }
 export interface SchoolData {
   user: SessionUser; school: School; settings: SchoolSettings;
+  schoolYears: SchoolYear[]; studentEnrollments: StudentEnrollment[]; enrollmentClassChanges: EnrollmentClassChange[];
   students: Student[]; classes: Classroom[]; teachers: Teacher[]; subjects: Subject[]; assignments: Assignment[];
   grades: Grade[]; attendance: Attendance[]; schedules: Schedule[]; communications: Communication[]; activities: Activity[];
   reports: ReportCard[]; attendanceRate: number | null; enrollment: { month: string; students: number }[]; users: UserAccount[];

@@ -5,6 +5,7 @@ import { hasPermission } from './permissions.mjs'
 import { calculateReportCard, round } from './school-calculations.mjs'
 import { loadSchoolRows } from './school-data-queries.mjs'
 import { scopeSchoolDataForUser } from './teacher-scope.mjs'
+import { loadAcademicYearRows } from './academic-year-data.mjs'
 import type { SchoolData } from './types'
 
 export async function getSchoolData(): Promise<SchoolData> {
@@ -19,6 +20,12 @@ export async function getSchoolData(): Promise<SchoolData> {
     includeUsers: hasPermission(user.role, 'users:write'),
   })
   if (!schools.length || !settings.length) throw new Error('Établissement ou paramètres introuvables. Exécutez les migrations et l’amorçage.')
+  const teacherClassIds = assignments.map((row) => row.class_id)
+  const academicYearRows = await loadAcademicYearRows(sql, schoolId, {
+    isTeacher: user.role === 'teacher',
+    classIds: teacherClassIds,
+  })
+  const visibleClassIds = new Set(teacherClassIds)
 
   const mappedStudents = students.map((row) => ({ id: row.id, studentNumber: row.student_number, fullName: row.full_name, classId: row.class_id, className: row.class_name, birthDate: row.birth_date ?? '', guardianName: row.guardian_name, guardianPhone: row.guardian_phone, status: row.status, enrolledAt: row.enrolled_at }))
   const mappedSubjects = subjects.map((row) => ({ id: row.id, name: row.name, coefficient: Number(row.coefficient) }))
@@ -34,6 +41,9 @@ export async function getSchoolData(): Promise<SchoolData> {
     user,
     school: { id: schools[0].id, name: schools[0].name, city: schools[0].city, country: schools[0].country, address: schools[0].address, phone: schools[0].phone, email: schools[0].email },
     settings: { academicYear: settings[0].academic_year, currentTerm, periodType: settings[0].period_type, yearStart: settings[0].year_start ?? '', yearEnd: settings[0].year_end ?? '', passingAverage: Number(settings[0].passing_average) },
+    schoolYears: academicYearRows.schoolYears.map((row) => ({ id: row.id, label: row.label, startDate: row.start_date, endDate: row.end_date, status: row.status })),
+    studentEnrollments: academicYearRows.studentEnrollments.map((row) => ({ id: row.id, studentId: row.student_id, studentName: row.student_name, schoolYearId: row.school_year_id, schoolYearLabel: row.school_year_label, classId: row.class_id, className: row.class_name, status: row.status, enrolledAt: row.enrolled_at })),
+    enrollmentClassChanges: academicYearRows.enrollmentClassChanges.map((row) => ({ id: row.id, enrollmentId: row.enrollment_id, studentId: row.student_id, studentName: row.student_name, schoolYearId: row.school_year_id, schoolYearLabel: row.school_year_label, classBeforeName: user.role === 'teacher' && row.class_before_id && !visibleClassIds.has(row.class_before_id) ? null : row.class_before_name, classAfterName: row.class_after_name, effectiveOn: row.effective_on })),
     students: mappedStudents,
     classes: classes.map((row) => ({ id: row.id, name: row.name, level: row.level, room: row.room, leadTeacherId: row.lead_teacher_id, leadTeacher: row.lead_teacher, enrolled: Number(row.enrolled) })),
     teachers: teachers.map((row) => ({ id: row.id, fullName: row.full_name, email: row.email, phone: row.phone, status: row.status, assignments: (row.assignments as { class: string; subject: string }[]).map((item) => `${item.class} · ${item.subject}`) })),
